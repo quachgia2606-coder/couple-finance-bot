@@ -20,10 +20,34 @@ GOOGLE_SHEET_ID = os.environ.get('GOOGLE_SHEET_ID', '1CRWaO855R-_8GKR2Pwpqw28ZFW
 slack_client = WebClient(token=SLACK_BOT_TOKEN)
 signature_verifier = SignatureVerifier(SLACK_SIGNING_SECRET)
 
-# Store last deleted transaction for undo
-last_deleted = {}
-# Store last list results for delete by number
-last_list_results = {}
+# ============== DUPLICATE EVENT PREVENTION ==============
+# Store last 100 processed event IDs to prevent duplicate processing
+processed_events = set()
+MAX_PROCESSED_EVENTS = 100
+
+def is_duplicate_event(event_id):
+    """Check if event was already processed"""
+    global processed_events
+    
+    if not event_id:
+        return False
+    
+    if event_id in processed_events:
+        return True
+    
+    # Add to processed set
+    processed_events.add(event_id)
+    
+    # Keep set size manageable
+    if len(processed_events) > MAX_PROCESSED_EVENTS:
+        # Remove oldest entries (convert to list, slice, convert back)
+        processed_events = set(list(processed_events)[-50:])
+    
+    return False
+
+# ============== STORAGE FOR UNDO/LIST ==============
+last_deleted = {}  # Store deleted items for undo
+last_list_results = {}  # Store list results for delete by number
 
 # ============== MASTER CATEGORIES ==============
 CATEGORIES = {
@@ -141,11 +165,9 @@ CATEGORIES = {
     },
 }
 
-# Income keywords for type detection
 INCOME_KEYWORDS = ['salary', 'commission', 'bonus', 'income', 'fee', 'revenue', 'wage', 'pay',
                    'lương', 'hoa hồng', 'thưởng', 'thu nhập', 'tiền lương', 'ad management fee']
 
-# Month mappings
 MONTH_NAMES = {
     'jan': 1, 'january': 1, 'feb': 2, 'february': 2, 'mar': 3, 'march': 3,
     'apr': 4, 'april': 4, 'may': 5, 'jun': 6, 'june': 6,
@@ -187,7 +209,6 @@ def get_fixed_bills_sheet():
     return get_sheet('Fixed Bills')
 
 def parse_amount(amount_str):
-    """Parse amount from string like 2.8M, 500K, 2800000"""
     amount_str = str(amount_str).replace(',', '').replace('₩', '').replace(' ', '').strip()
     match = re.match(r'^([\d.]+)([mkMK]?)$', amount_str)
     if match:
@@ -201,7 +222,6 @@ def parse_amount(amount_str):
     return None
 
 def fmt(amount):
-    """Format amount for display"""
     if amount >= 1000000:
         return f"₩{amount/1000000:.1f}M"
     elif amount >= 1000:
@@ -209,10 +229,6 @@ def fmt(amount):
     return f"₩{amount:,.0f}"
 
 def extract_amount_from_text(text):
-    """Find and extract amount from anywhere in text, return (amount, remaining_text)"""
-    # Pattern to find amount anywhere in text
-    pattern = r'([\d.,]+[mkMK]?|\d{4,})'
-    
     words = text.split()
     amount = None
     remaining_words = []
@@ -227,7 +243,6 @@ def extract_amount_from_text(text):
     return amount, ' '.join(remaining_words)
 
 def parse_month(text):
-    """Parse month from text like 'dec', '2025-12'"""
     text = text.lower().strip()
     now = datetime.now()
     
@@ -243,7 +258,6 @@ def parse_month(text):
     return None
 
 def extract_month_from_text(text):
-    """Extract month reference from text, return (cleaned_text, year, month, is_backdated)"""
     words = text.split()
     now = datetime.now()
     
@@ -259,7 +273,6 @@ def extract_month_from_text(text):
     return text, now.year, now.month, False
 
 def extract_person_from_text(text):
-    """Extract person (jacob/naomi/joint) from text"""
     words = text.lower().split()
     person = None
     remaining_words = []
@@ -273,7 +286,6 @@ def extract_person_from_text(text):
     return person, ' '.join(remaining_words)
 
 def detect_category(text):
-    """Detect category from text based on keywords"""
     text_lower = text.lower()
     
     for category, data in CATEGORIES.items():
@@ -284,7 +296,6 @@ def detect_category(text):
     return 'Other', {'emoji': ['📝'], 'responses': ["Logged! 📝"]}
 
 def is_income(text, category):
-    """Check if transaction is income based on keywords"""
     text_lower = text.lower()
     
     if category == 'Income':
@@ -297,7 +308,6 @@ def is_income(text, category):
     return False
 
 def get_fixed_bills_dict():
-    """Get fixed bills from sheet"""
     sheet = get_fixed_bills_sheet()
     if not sheet:
         return {}
@@ -324,20 +334,16 @@ def get_fixed_bills_dict():
     return bills
 
 def find_fixed_bill(text):
-    """Check if text matches a fixed bill"""
     bills = get_fixed_bills_dict()
     text_lower = text.lower().strip()
     
-    # Direct match
     if text_lower in bills:
         return bills[text_lower]
     
-    # Partial match
     for key, bill in bills.items():
         if text_lower in key or key in text_lower:
             return bill
     
-    # Aliases
     aliases = {
         'gas': 'gas', 'electricity': 'electricity', 'electric': 'electricity',
         'internet': 'internet', 'wifi': 'internet', 'rent': 'rent',
@@ -353,13 +359,11 @@ def find_fixed_bill(text):
     return None
 
 def get_personality_response(category, category_data, amount, is_income):
-    """Get a random personality response (50% chance)"""
-    if random.random() > 0.5:  # 50% chance to add personality
+    if random.random() > 0.5:
         return ""
     
     responses = category_data.get('responses', ["Logged! 📝"])
     
-    # Special responses for big amounts
     if is_income and amount >= 5000000:
         return random.choice(["🎊 WOW! Amazing! 🚀", "Big income! 💰💰💰", "Incredible! Keep it up! 🔥"])
     
@@ -369,49 +373,62 @@ def get_personality_response(category, category_data, amount, is_income):
     return random.choice(responses)
 
 def get_emoji(category, category_data, is_income):
-    """Get emoji for category"""
     if is_income:
         return random.choice(['💰', '💵', '🎉'])
     return random.choice(category_data.get('emoji', ['📝']))
 
+# ============== DUPLICATE INCOME CHECK ==============
+
+def check_duplicate_income(tx_data):
+    """Check if similar income was logged recently (same amount, same day, same type)"""
+    if tx_data['type'] != 'Income':
+        return None
+    
+    sheet = get_transaction_sheet()
+    if not sheet:
+        return None
+    
+    records = sheet.get_all_records()
+    today = datetime.now().strftime('%Y-%m-%d')
+    amount = tx_data['amount']
+    description_lower = tx_data['description'].lower()
+    
+    for row in records:
+        if (row.get('Type') == 'Income' and 
+            row.get('Date') == today and
+            row.get('Amount') == amount):
+            # Check if description is similar (contains same keywords)
+            row_desc = str(row.get('Description', '')).lower()
+            if (description_lower in row_desc or 
+                row_desc in description_lower or
+                'lương' in description_lower and 'lương' in row_desc or
+                'salary' in description_lower and 'salary' in row_desc or
+                'commission' in description_lower and 'commission' in row_desc):
+                return row
+    
+    return None
+
 # ============== TRANSACTION PARSING ==============
 
 def parse_transaction(text, user_name):
-    """
-    Parse transaction from flexible input formats:
-    - salary 2m
-    - 2m salary
-    - jacob 2.8M salary
-    - naomi salary 2m
-    - 50K cà phê
-    - gas dec 150K
-    - 150K quà cưới chị A
-    """
     original_text = text.strip()
     
-    # Step 1: Extract month if present
     text, year, month, is_backdated = extract_month_from_text(original_text)
-    
-    # Step 2: Extract person if present
     person, text = extract_person_from_text(text)
     if not person:
         person = user_name
     
-    # Step 3: Extract amount
     amount, description = extract_amount_from_text(text)
     
     if not amount:
         return None
     
-    # Step 4: Clean up description
     description = description.strip()
     if not description:
         description = "Transaction"
     
-    # Step 5: Check if it's a fixed bill
     fixed_bill = find_fixed_bill(description)
     
-    # Step 6: Detect category
     if fixed_bill:
         category = fixed_bill['category']
         category_data = {'emoji': ['📋'], 'responses': ["Fixed bill logged! 📋"]}
@@ -422,7 +439,6 @@ def parse_transaction(text, user_name):
     else:
         category, category_data = detect_category(description)
     
-    # Step 7: Determine if income or expense
     tx_is_income = is_income(description, category)
     
     return {
@@ -441,7 +457,6 @@ def parse_transaction(text, user_name):
 # ============== TRANSACTION LOGGING ==============
 
 def log_transaction(tx_data):
-    """Log transaction to Google Sheet"""
     sheet = get_transaction_sheet()
     if not sheet:
         return False, "Cannot connect to Google Sheets"
@@ -457,44 +472,39 @@ def log_transaction(tx_data):
     month_start = f"{year}-{month:02d}-01"
     
     row = [
-        date_str,                    # Date
-        tx_data['type'],             # Type (Income/Expense)
-        tx_data['category'],         # Category (smart detected)
-        tx_data['amount'],           # Amount
-        tx_data['description'],      # Description (original text)
-        tx_data['person'],           # Person
-        month_start,                 # Month
-        'slack'                      # Source
+        date_str,
+        tx_data['type'],
+        tx_data['category'],
+        tx_data['amount'],
+        tx_data['description'],
+        tx_data['person'],
+        month_start,
+        'slack'
     ]
     
     sheet.append_row(row)
     return True, "Transaction logged!"
 
-def build_response(tx_data):
-    """Build response message with personality"""
+def build_response(tx_data, duplicate_warning=None):
     category = tx_data['category']
     category_data = tx_data.get('category_data', {})
     amount = tx_data['amount']
     description = tx_data['description']
-    is_income = tx_data['type'] == 'Income'
+    is_income_tx = tx_data['type'] == 'Income'
     is_backdated = tx_data.get('is_backdated', False)
     year = tx_data.get('year')
     month = tx_data.get('month')
     fixed_bill = tx_data.get('fixed_bill')
     
-    # Get emoji
-    emoji = get_emoji(category, category_data, is_income)
+    emoji = get_emoji(category, category_data, is_income_tx)
     
-    # Build main response
     response = f"{emoji} Logged: {category} - {fmt(amount)}\n"
     response += f"📝 {description}\n"
     
-    # Add backdate info
     if is_backdated:
         month_name = f"{MONTH_NAMES_REVERSE[month]} {year}"
         response += f"📅 {month_name} (backdated)\n"
     
-    # Add fixed bill comparison
     if fixed_bill:
         default_amount = fixed_bill['amount']
         if default_amount > 0:
@@ -511,17 +521,21 @@ def build_response(tx_data):
             elif ratio < 0.5:
                 response += f"📊 Usually {fmt(default_amount)} - nice savings! 🎉"
     
-    # Add personality (50% chance)
-    personality = get_personality_response(category, category_data, amount, is_income)
-    if personality:
-        response += f"\n{personality}"
+    # Add duplicate warning if exists
+    if duplicate_warning:
+        response += f"\n\n⚠️ *Warning:* You already logged {fmt(amount)} \"{description}\" today!"
+        response += "\nDuplicate? Use `delete last` to remove."
+    else:
+        # Add personality only if no warning
+        personality = get_personality_response(category, category_data, amount, is_income_tx)
+        if personality:
+            response += f"\n{personality}"
     
     return response
 
 # ============== LIST/DELETE/EDIT FUNCTIONS ==============
 
 def get_all_transactions():
-    """Get all transactions from sheet"""
     sheet = get_transaction_sheet()
     if not sheet:
         return []
@@ -546,7 +560,6 @@ def get_all_transactions():
     return transactions
 
 def filter_transactions(transactions, filter_type=None, filter_category=None, filter_person=None, filter_month=None, limit=None):
-    """Filter transactions based on criteria"""
     filtered = transactions
     
     if filter_type:
@@ -570,8 +583,7 @@ def filter_transactions(transactions, filter_type=None, filter_category=None, fi
     return filtered
 
 def parse_list_command(text):
-    """Parse list command parameters"""
-    words = text.lower().split()[1:]  # Remove 'list'
+    words = text.lower().split()[1:]
     
     filter_type = None
     filter_category = None
@@ -601,7 +613,6 @@ def parse_list_command(text):
     return filter_type, filter_category, filter_person, filter_month, limit
 
 def format_transaction_list(transactions, title, channel_id):
-    """Format transaction list for display"""
     if not transactions:
         return "📋 No transactions found."
     
@@ -609,7 +620,7 @@ def format_transaction_list(transactions, title, channel_id):
     
     msg = f"📋 *{title}:*\n\n"
     
-    for i, tx in enumerate(transactions[:20], 1):  # Limit to 20
+    for i, tx in enumerate(transactions[:20], 1):
         date_str = tx['date'][:10]
         try:
             date_obj = datetime.strptime(date_str, '%Y-%m-%d')
@@ -625,55 +636,133 @@ def format_transaction_list(transactions, title, channel_id):
     if len(transactions) > 20:
         msg += f"\n... and {len(transactions) - 20} more"
     
-    msg += f"\n\n*Delete:* `delete 1` | *Edit:* `edit 1 150K`"
+    msg += f"\n\n*Delete:* `delete 1` or `delete 1,2,3` or `delete 1-5`"
     
     return msg
 
-def delete_transaction(row_index, channel_id):
-    """Delete transaction by row index"""
+def parse_delete_targets(target_str):
+    """
+    Parse delete targets from string like:
+    - "3" -> [3]
+    - "3,4,5" -> [3, 4, 5]
+    - "3-7" -> [3, 4, 5, 6, 7]
+    - "1,3,5-8" -> [1, 3, 5, 6, 7, 8]
+    - "last" -> ['last']
+    - "last 3" -> ['last', 3]
+    """
+    targets = []
+    
+    if target_str.startswith('last'):
+        parts = target_str.split()
+        if len(parts) > 1 and parts[1].isdigit():
+            return ['last', int(parts[1])]
+        return ['last']
+    
+    # Split by comma
+    parts = target_str.replace(' ', '').split(',')
+    
+    for part in parts:
+        if '-' in part and not part.startswith('-'):
+            # Range like "3-7"
+            range_parts = part.split('-')
+            if len(range_parts) == 2 and range_parts[0].isdigit() and range_parts[1].isdigit():
+                start = int(range_parts[0])
+                end = int(range_parts[1])
+                targets.extend(range(start, end + 1))
+        elif part.isdigit():
+            targets.append(int(part))
+    
+    # Remove duplicates and sort in reverse (delete from bottom up to preserve indices)
+    return sorted(list(set(targets)), reverse=True)
+
+def delete_transactions(targets, channel_id):
+    """Delete multiple transactions"""
     global last_deleted
     
     sheet = get_transaction_sheet()
     if not sheet:
-        return False, "Cannot connect to Google Sheets"
+        return False, "Cannot connect to Google Sheets", []
+    
+    transactions = get_all_transactions()
+    
+    # Handle "last" or "last N"
+    if targets and targets[0] == 'last':
+        count = targets[1] if len(targets) > 1 else 1
+        sorted_tx = sorted(transactions, key=lambda x: x['date'], reverse=True)
+        targets = [i + 1 for i in range(min(count, len(sorted_tx)))]
+        # Update list results for proper indexing
+        last_list_results[channel_id] = sorted_tx
+    
+    if channel_id not in last_list_results:
+        return False, "Use `list` first to see transactions", []
+    
+    list_results = last_list_results[channel_id]
+    deleted_items = []
+    deleted_rows_data = []
+    
+    # Validate all targets first
+    for idx in targets:
+        if idx < 1 or idx > len(list_results):
+            return False, f"Invalid number: {idx}. Use `list` first.", []
+    
+    # Sort targets in reverse order (delete from bottom up)
+    sorted_targets = sorted(targets, reverse=True)
     
     try:
-        row_data = sheet.row_values(row_index)
+        for idx in sorted_targets:
+            tx = list_results[idx - 1]
+            row_data = sheet.row_values(tx['row_index'])
+            deleted_rows_data.append({
+                'row_data': row_data,
+                'tx': tx
+            })
+            sheet.delete_rows(tx['row_index'])
+            deleted_items.append(tx)
+            
+            # Adjust row indices for remaining items
+            for item in list_results:
+                if item['row_index'] > tx['row_index']:
+                    item['row_index'] -= 1
+        
+        # Store for undo
         last_deleted[channel_id] = {
-            'row_data': row_data,
+            'items': deleted_rows_data,
             'timestamp': datetime.now()
         }
         
-        sheet.delete_rows(row_index)
-        return True, row_data
+        return True, "Deleted successfully", deleted_items
+    
     except Exception as e:
-        return False, str(e)
+        return False, str(e), []
 
 def undo_delete(channel_id):
-    """Undo last delete"""
     global last_deleted
     
     if channel_id not in last_deleted:
-        return False, "Nothing to undo"
+        return False, "Nothing to undo", []
     
     deleted_info = last_deleted[channel_id]
     time_diff = (datetime.now() - deleted_info['timestamp']).seconds
     if time_diff > 300:
-        return False, "Undo expired (>5 minutes)"
+        return False, "Undo expired (>5 minutes)", []
     
     sheet = get_transaction_sheet()
     if not sheet:
-        return False, "Cannot connect to Google Sheets"
+        return False, "Cannot connect to Google Sheets", []
     
     try:
-        sheet.append_row(deleted_info['row_data'])
+        restored = []
+        for item in deleted_info['items']:
+            sheet.append_row(item['row_data'])
+            restored.append(item['tx'])
+        
         del last_deleted[channel_id]
-        return True, deleted_info['row_data']
+        return True, "Restored successfully", restored
+    
     except Exception as e:
-        return False, str(e)
+        return False, str(e), []
 
 def edit_transaction(row_index, new_amount):
-    """Edit transaction amount"""
     sheet = get_transaction_sheet()
     if not sheet:
         return False, "Cannot connect to Google Sheets"
@@ -688,7 +777,6 @@ def edit_transaction(row_index, new_amount):
 # ============== STATUS FUNCTIONS ==============
 
 def get_fund_status():
-    """Get fund balances"""
     sheet = get_transaction_sheet()
     if not sheet:
         return None
@@ -707,7 +795,6 @@ def get_fund_status():
     return funds
 
 def get_monthly_summary(month=None):
-    """Get monthly summary"""
     sheet = get_transaction_sheet()
     if not sheet:
         return None
@@ -741,7 +828,6 @@ def get_monthly_summary(month=None):
     }
 
 def get_fixed_bills_total():
-    """Get total of all fixed bills"""
     bills = get_fixed_bills_dict()
     seen = set()
     total = 0
@@ -767,15 +853,20 @@ def slack_events():
     event = data.get('event', {})
     event_type = event.get('type')
     
+    # Skip bot messages
     if event.get('bot_id'):
         return jsonify({'ok': True})
+    
+    # ===== DUPLICATE EVENT CHECK =====
+    event_id = event.get('client_msg_id') or event.get('event_ts') or data.get('event_id')
+    if is_duplicate_event(event_id):
+        return jsonify({'ok': True})  # Skip duplicate
     
     if event_type == 'message':
         channel = event.get('channel')
         text = event.get('text', '').strip()
         user_id = event.get('user')
         
-        # Get user name
         try:
             user_info = slack_client.users_info(user=user_id)
             user_name = user_info['user']['real_name'].split()[0]
@@ -808,8 +899,8 @@ def slack_events():
                 
                 if funds:
                     msg += "*Fund Balances:*\n"
-                    for fund, data in funds.items():
-                        msg += f"• {fund}: {fmt(data['amount'])}\n"
+                    for fund, fdata in funds.items():
+                        msg += f"• {fund}: {fmt(fdata['amount'])}\n"
                     
                     emergency = funds.get('Emergency Fund', {}).get('amount', 0)
                     if emergency:
@@ -889,40 +980,35 @@ def slack_events():
             msg = format_transaction_list(filtered, title, channel)
             slack_client.chat_postMessage(channel=channel, text=msg)
         
-        # Command: delete
+        # Command: delete (supports multiple)
         elif text_lower.startswith('delete'):
-            words = text_lower.split()
+            target_str = text_lower.replace('delete', '').strip()
             
-            if len(words) < 2:
-                slack_client.chat_postMessage(channel=channel, text="❓ Usage: `delete 1` or `delete last`")
+            if not target_str:
+                slack_client.chat_postMessage(channel=channel, text="❓ Usage: `delete 1` or `delete 1,2,3` or `delete 1-5` or `delete last`")
                 return jsonify({'ok': True})
             
-            target = words[1]
+            targets = parse_delete_targets(target_str)
             
-            if target == 'last':
-                transactions = get_all_transactions()
-                if not transactions:
-                    slack_client.chat_postMessage(channel=channel, text="❌ No transactions to delete")
-                    return jsonify({'ok': True})
-                tx_to_delete = sorted(transactions, key=lambda x: x['date'], reverse=True)[0]
-            elif target.isdigit():
-                idx = int(target) - 1
-                if channel not in last_list_results or idx >= len(last_list_results[channel]):
-                    slack_client.chat_postMessage(channel=channel, text="❌ Invalid number. Use `list` first, then `delete 1`")
-                    return jsonify({'ok': True})
-                tx_to_delete = last_list_results[channel][idx]
-            else:
-                slack_client.chat_postMessage(channel=channel, text="❓ Usage: `delete 1` or `delete last`")
+            if not targets:
+                slack_client.chat_postMessage(channel=channel, text="❓ Invalid format. Use: `delete 1` or `delete 1,2,3` or `delete 1-5`")
                 return jsonify({'ok': True})
             
-            success, result = delete_transaction(tx_to_delete['row_index'], channel)
+            success, message, deleted_items = delete_transactions(targets, channel)
             
             if success:
-                msg = f"🗑️ Deleted: {tx_to_delete['category']} - {fmt(tx_to_delete['amount'])}\n"
+                if len(deleted_items) == 1:
+                    msg = f"🗑️ Deleted: {deleted_items[0]['category']} - {fmt(deleted_items[0]['amount'])}\n"
+                else:
+                    msg = f"🗑️ Deleted {len(deleted_items)} items:\n"
+                    for item in deleted_items[:5]:  # Show max 5
+                        msg += f"  • {item['category']} - {fmt(item['amount'])}\n"
+                    if len(deleted_items) > 5:
+                        msg += f"  ... and {len(deleted_items) - 5} more\n"
                 msg += "↩️ To undo: `undo`"
                 slack_client.chat_postMessage(channel=channel, text=msg)
             else:
-                slack_client.chat_postMessage(channel=channel, text=f"❌ Error: {result}")
+                slack_client.chat_postMessage(channel=channel, text=f"❌ {message}")
         
         # Command: edit
         elif text_lower.startswith('edit'):
@@ -962,17 +1048,20 @@ def slack_events():
         
         # Command: undo
         elif text_lower == 'undo':
-            success, result = undo_delete(channel)
+            success, message, restored = undo_delete(channel)
             
             if success:
-                msg = f"↩️ Restored: {result[2]} - {fmt(int(float(result[3])))}"
+                if len(restored) == 1:
+                    msg = f"↩️ Restored: {restored[0]['category']} - {fmt(restored[0]['amount'])}"
+                else:
+                    msg = f"↩️ Restored {len(restored)} items"
                 slack_client.chat_postMessage(channel=channel, text=msg)
             else:
-                slack_client.chat_postMessage(channel=channel, text=f"❌ {result}")
+                slack_client.chat_postMessage(channel=channel, text=f"❌ {message}")
         
         # Command: help
         elif text_lower in ['help', 'trợ giúp', '?']:
-            help_msg = """🤖 *Finance Bot V5*
+            help_msg = """🤖 *Finance Bot V5.1*
 
 *➕ Add Transaction:*
 • `salary 2m` - Log income
@@ -986,26 +1075,32 @@ def slack_events():
 • `list gas 5` - Last 5 gas bills
 • `last 5` - Last 5 transactions
 
-*✏️ Edit & Delete:*
-• `delete 1` or `delete last`
-• `edit 1 150K`
-• `undo`
+*🗑️ Delete (single or multiple):*
+• `delete 1` - Delete item #1
+• `delete 1,2,3` - Delete multiple
+• `delete 1-5` - Delete range
+• `delete last` - Delete most recent
+• `delete last 3` - Delete last 3
+
+*✏️ Edit & Undo:*
+• `edit 1 150K` - Change amount
+• `undo` - Restore deleted items
 
 *📊 Status:*
 • `status` - Summary + funds
-• `bills` - Fixed bills
-
-*💡 Smart Categories:*
-Food, Groceries, Transport, Gift, Family, Date, Entertainment, Shopping, Travel, Healthcare, Business, and more!"""
+• `bills` - Fixed bills"""
             slack_client.chat_postMessage(channel=channel, text=help_msg)
         
         # Try to parse as transaction
         else:
             tx = parse_transaction(text, user_name)
             if tx:
+                # Check for duplicate income
+                duplicate = check_duplicate_income(tx)
+                
                 success, msg = log_transaction(tx)
                 if success:
-                    response = build_response(tx)
+                    response = build_response(tx, duplicate_warning=duplicate)
                 else:
                     response = f"❌ Error: {msg}"
                 slack_client.chat_postMessage(channel=channel, text=response)
@@ -1014,7 +1109,7 @@ Food, Groceries, Transport, Gift, Family, Date, Entertainment, Shopping, Travel,
 
 @app.route('/', methods=['GET'])
 def health():
-    return jsonify({'status': 'ok', 'bot': 'Couple Finance Bot V5'})
+    return jsonify({'status': 'ok', 'bot': 'Couple Finance Bot V5.1'})
 
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 3000))

@@ -21,12 +21,10 @@ slack_client = WebClient(token=SLACK_BOT_TOKEN)
 signature_verifier = SignatureVerifier(SLACK_SIGNING_SECRET)
 
 # ============== DUPLICATE EVENT PREVENTION ==============
-# Store last 100 processed event IDs to prevent duplicate processing
 processed_events = set()
 MAX_PROCESSED_EVENTS = 100
 
 def is_duplicate_event(event_id):
-    """Check if event was already processed"""
     global processed_events
     
     if not event_id:
@@ -35,19 +33,17 @@ def is_duplicate_event(event_id):
     if event_id in processed_events:
         return True
     
-    # Add to processed set
     processed_events.add(event_id)
     
-    # Keep set size manageable
     if len(processed_events) > MAX_PROCESSED_EVENTS:
-        # Remove oldest entries (convert to list, slice, convert back)
         processed_events = set(list(processed_events)[-50:])
     
     return False
 
 # ============== STORAGE FOR UNDO/LIST ==============
-last_deleted = {}  # Store deleted items for undo
-last_list_results = {}  # Store list results for delete by number
+last_deleted = {}
+last_list_results = {}
+last_debt_list = {}  # Store debt list for 'paid' command
 
 # ============== MASTER CATEGORIES ==============
 CATEGORIES = {
@@ -123,9 +119,10 @@ CATEGORIES = {
     },
     'Loan & Debt': {
         'keywords': ['lend', 'borrow', 'debt', 'loan', 'repay', 'pay back',
-                     'cho mượn', 'mượn', 'trả nợ', 'vay', 'nợ', 'trả lại', 'cho vay'],
-        'emoji': ['💸', '🤝', '📝'],
-        'responses': ["Noted! 📝", "Good to track this 💸", "Money matters! 🤝"]
+                     'cho mượn', 'mượn', 'trả nợ', 'vay', 'nợ', 'trả lại', 'cho vay',
+                     'thiếu', 'lending', 'owed', 'trả tiền'],
+        'emoji': ['🤝', '💸', '📝'],
+        'responses': ["Loan tracked! 🤝", "Don't forget to follow up! 📝", "Noted! 💸"]
     },
     'Business': {
         'keywords': ['ads', 'contractor', 'client', 'marketing', 'revenue', 'business',
@@ -158,15 +155,20 @@ CATEGORIES = {
         'responses': ["For the fur baby! 🐾", "Pet parent life! 🐱"]
     },
     'Income': {
-        'keywords': ['salary', 'commission', 'bonus', 'income', 'fee', 'revenue', 'wage', 'pay',
+        'keywords': ['salary', 'commission', 'bonus', 'income', 'revenue', 'wage', 'pay',
                      'lương', 'hoa hồng', 'thưởng', 'thu nhập', 'tiền lương'],
         'emoji': ['💰', '🎉', '💵'],
         'responses': ["Money in! 💰", "Cha-ching! 🎉", "Nice! Keep it coming! 💪", "Pay day! 💵"]
     },
 }
 
-INCOME_KEYWORDS = ['salary', 'commission', 'bonus', 'income', 'fee', 'revenue', 'wage', 'pay',
-                   'lương', 'hoa hồng', 'thưởng', 'thu nhập', 'tiền lương', 'ad management fee']
+# Income keywords - EXACT word match to avoid "coffee" containing "fee"
+INCOME_KEYWORDS_EXACT = ['salary', 'commission', 'bonus', 'income', 'revenue', 'wage', 'pay',
+                         'lương', 'hoa hồng', 'thưởng', 'thu nhập', 'tiền lương', 'fee']
+
+# Loan keywords for detection
+LOAN_KEYWORDS = ['cho mượn', 'mượn', 'cho vay', 'vay', 'nợ', 'thiếu', 'lend', 'borrow', 'loan', 'debt', 'owed']
+REPAY_KEYWORDS = ['trả nợ', 'trả lại', 'repay', 'pay back', 'paid back', 'trả tiền', 'nhận lại']
 
 MONTH_NAMES = {
     'jan': 1, 'january': 1, 'feb': 2, 'february': 2, 'mar': 3, 'march': 3,
@@ -296,15 +298,35 @@ def detect_category(text):
     return 'Other', {'emoji': ['📝'], 'responses': ["Logged! 📝"]}
 
 def is_income(text, category):
+    """Check if transaction is income - using EXACT word match to avoid 'coffee' containing 'fee'"""
     text_lower = text.lower()
     
     if category == 'Income':
         return True
     
-    for keyword in INCOME_KEYWORDS:
-        if keyword in text_lower:
+    # Split into words for exact matching
+    words = re.findall(r'\b\w+\b', text_lower)
+    
+    for keyword in INCOME_KEYWORDS_EXACT:
+        if keyword in words:  # Exact word match
             return True
     
+    return False
+
+def is_loan_transaction(text):
+    """Check if transaction is a loan/debt"""
+    text_lower = text.lower()
+    for keyword in LOAN_KEYWORDS:
+        if keyword in text_lower:
+            return True
+    return False
+
+def is_repayment(text):
+    """Check if transaction is a repayment"""
+    text_lower = text.lower()
+    for keyword in REPAY_KEYWORDS:
+        if keyword in text_lower:
+            return True
     return False
 
 def get_fixed_bills_dict():
@@ -358,29 +380,48 @@ def find_fixed_bill(text):
     
     return None
 
-def get_personality_response(category, category_data, amount, is_income):
+def get_personality_response(category, category_data, amount, is_income_tx):
     if random.random() > 0.5:
         return ""
     
     responses = category_data.get('responses', ["Logged! 📝"])
     
-    if is_income and amount >= 5000000:
+    if is_income_tx and amount >= 5000000:
         return random.choice(["🎊 WOW! Amazing! 🚀", "Big income! 💰💰💰", "Incredible! Keep it up! 🔥"])
     
-    if not is_income and amount >= 1000000:
+    if not is_income_tx and amount >= 1000000:
         return random.choice(["Big purchase! 🛒", "That's a big one! 💸"])
     
     return random.choice(responses)
 
-def get_emoji(category, category_data, is_income):
-    if is_income:
+def get_emoji(category, category_data, is_income_tx):
+    if is_income_tx:
         return random.choice(['💰', '💵', '🎉'])
     return random.choice(category_data.get('emoji', ['📝']))
+
+# ============== USER DETECTION ==============
+
+def detect_user_name(user_id):
+    """Detect if user is Jacob or Naomi with better Vietnamese name support"""
+    try:
+        user_info = slack_client.users_info(user=user_id)
+        display_name = user_info['user'].get('real_name', '').lower()
+        username = user_info['user'].get('name', '').lower()
+        
+        # Check for Naomi indicators (including Vietnamese names)
+        naomi_indicators = ['naomi', 'nao', 'thương', 'thuong', 'bùi', 'bui', 'thươngbùi', 'thuongbui']
+        
+        for indicator in naomi_indicators:
+            if indicator in display_name or indicator in username:
+                return 'Naomi'
+        
+        return 'Jacob'
+    except:
+        return 'Jacob'
 
 # ============== DUPLICATE INCOME CHECK ==============
 
 def check_duplicate_income(tx_data):
-    """Check if similar income was logged recently (same amount, same day, same type)"""
     if tx_data['type'] != 'Income':
         return None
     
@@ -397,7 +438,6 @@ def check_duplicate_income(tx_data):
         if (row.get('Type') == 'Income' and 
             row.get('Date') == today and
             row.get('Amount') == amount):
-            # Check if description is similar (contains same keywords)
             row_desc = str(row.get('Description', '')).lower()
             if (description_lower in row_desc or 
                 row_desc in description_lower or
@@ -407,6 +447,64 @@ def check_duplicate_income(tx_data):
                 return row
     
     return None
+
+# ============== LOAN/DEBT FUNCTIONS ==============
+
+def get_outstanding_loans():
+    """Get all loan/debt transactions that haven't been marked as paid"""
+    sheet = get_transaction_sheet()
+    if not sheet:
+        return []
+    
+    records = sheet.get_all_records()
+    loans = []
+    
+    for i, row in enumerate(records):
+        if row.get('Type') == 'Expense' and row.get('Category') == 'Loan & Debt':
+            description = str(row.get('Description', '')).lower()
+            # Skip if it's a repayment
+            if not is_repayment(description):
+                loans.append({
+                    'row_index': i + 2,
+                    'date': row.get('Date', ''),
+                    'amount': row.get('Amount', 0),
+                    'description': row.get('Description', ''),
+                    'person': row.get('Person', ''),
+                })
+    
+    return loans
+
+def has_outstanding_loans():
+    """Check if there are any outstanding loans"""
+    loans = get_outstanding_loans()
+    return len(loans) > 0
+
+def mark_loan_as_paid(loan_index, channel_id):
+    """Mark a loan as paid by logging repayment income"""
+    if channel_id not in last_debt_list or loan_index >= len(last_debt_list[channel_id]):
+        return False, "Invalid loan number. Use `list debt` first."
+    
+    loan = last_debt_list[channel_id][loan_index]
+    
+    # Log as income (repayment received)
+    sheet = get_transaction_sheet()
+    if not sheet:
+        return False, "Cannot connect to Google Sheets"
+    
+    now = datetime.now()
+    row = [
+        now.strftime('%Y-%m-%d'),
+        'Income',
+        'Loan & Debt',
+        loan['amount'],
+        f"nhận lại/trả nợ: {loan['description']}",
+        loan['person'],
+        now.strftime('%Y-%m-01'),
+        'slack'
+    ]
+    
+    sheet.append_row(row)
+    return True, loan
 
 # ============== TRANSACTION PARSING ==============
 
@@ -437,9 +535,19 @@ def parse_transaction(text, user_name):
         else:
             person = 'Joint'
     else:
-        category, category_data = detect_category(description)
+        # Check if it's a loan transaction
+        if is_loan_transaction(description):
+            category = 'Loan & Debt'
+            category_data = CATEGORIES.get('Loan & Debt', {'emoji': ['🤝'], 'responses': ["Loan tracked! 🤝"]})
+        else:
+            category, category_data = detect_category(description)
     
     tx_is_income = is_income(description, category)
+    
+    # If it's a repayment, mark as income
+    if is_repayment(description):
+        tx_is_income = True
+        category = 'Loan & Debt'
     
     return {
         'person': person,
@@ -451,7 +559,8 @@ def parse_transaction(text, user_name):
         'fixed_bill': fixed_bill,
         'year': year,
         'month': month,
-        'is_backdated': is_backdated
+        'is_backdated': is_backdated,
+        'is_loan': is_loan_transaction(description)
     }
 
 # ============== TRANSACTION LOGGING ==============
@@ -495,6 +604,7 @@ def build_response(tx_data, duplicate_warning=None):
     year = tx_data.get('year')
     month = tx_data.get('month')
     fixed_bill = tx_data.get('fixed_bill')
+    is_loan = tx_data.get('is_loan', False)
     
     emoji = get_emoji(category, category_data, is_income_tx)
     
@@ -521,12 +631,14 @@ def build_response(tx_data, duplicate_warning=None):
             elif ratio < 0.5:
                 response += f"📊 Usually {fmt(default_amount)} - nice savings! 🎉"
     
-    # Add duplicate warning if exists
+    # Add loan tracking hint
+    if is_loan:
+        response += "\n💡 Track with `list debt`"
+    
     if duplicate_warning:
         response += f"\n\n⚠️ *Warning:* You already logged {fmt(amount)} \"{description}\" today!"
         response += "\nDuplicate? Use `delete last` to remove."
     else:
-        # Add personality only if no warning
         personality = get_personality_response(category, category_data, amount, is_income_tx)
         if personality:
             response += f"\n{personality}"
@@ -566,8 +678,12 @@ def filter_transactions(transactions, filter_type=None, filter_category=None, fi
         filtered = [t for t in filtered if t['type'].lower() == filter_type.lower()]
     
     if filter_category:
-        filtered = [t for t in filtered if filter_category.lower() in t['category'].lower() or 
-                    filter_category.lower() in t['description'].lower()]
+        # Special handling for 'debt' filter
+        if filter_category.lower() in ['debt', 'loan', 'nợ', 'mượn']:
+            filtered = [t for t in filtered if t['category'] == 'Loan & Debt']
+        else:
+            filtered = [t for t in filtered if filter_category.lower() in t['category'].lower() or 
+                        filter_category.lower() in t['description'].lower()]
     
     if filter_person:
         filtered = [t for t in filtered if t['person'].lower() == filter_person.lower()]
@@ -612,11 +728,13 @@ def parse_list_command(text):
     
     return filter_type, filter_category, filter_person, filter_month, limit
 
-def format_transaction_list(transactions, title, channel_id):
+def format_transaction_list(transactions, title, channel_id, is_debt_list=False):
     if not transactions:
         return "📋 No transactions found."
     
     last_list_results[channel_id] = transactions
+    if is_debt_list:
+        last_debt_list[channel_id] = transactions
     
     msg = f"📋 *{title}:*\n\n"
     
@@ -630,26 +748,21 @@ def format_transaction_list(transactions, title, channel_id):
         
         emoji = "💵" if tx['type'] == 'Income' else "💸"
         amount = tx['amount'] or 0
+        description = tx['description'][:30] + "..." if len(tx['description']) > 30 else tx['description']
         
-        msg += f"{i}. {emoji} {date_display} | {tx['category']} | {fmt(amount)} | {tx['person']}\n"
+        msg += f"{i}. {emoji} {date_display} | {tx['category']} | {fmt(amount)} | {description}\n"
     
     if len(transactions) > 20:
         msg += f"\n... and {len(transactions) - 20} more"
     
-    msg += f"\n\n*Delete:* `delete 1` or `delete 1,2,3` or `delete 1-5`"
+    if is_debt_list:
+        msg += f"\n\n*Mark as paid:* `paid 1`"
+    else:
+        msg += f"\n\n*Delete:* `delete 1` or `delete 1,2,3`"
     
     return msg
 
 def parse_delete_targets(target_str):
-    """
-    Parse delete targets from string like:
-    - "3" -> [3]
-    - "3,4,5" -> [3, 4, 5]
-    - "3-7" -> [3, 4, 5, 6, 7]
-    - "1,3,5-8" -> [1, 3, 5, 6, 7, 8]
-    - "last" -> ['last']
-    - "last 3" -> ['last', 3]
-    """
     targets = []
     
     if target_str.startswith('last'):
@@ -658,12 +771,10 @@ def parse_delete_targets(target_str):
             return ['last', int(parts[1])]
         return ['last']
     
-    # Split by comma
     parts = target_str.replace(' ', '').split(',')
     
     for part in parts:
         if '-' in part and not part.startswith('-'):
-            # Range like "3-7"
             range_parts = part.split('-')
             if len(range_parts) == 2 and range_parts[0].isdigit() and range_parts[1].isdigit():
                 start = int(range_parts[0])
@@ -672,11 +783,9 @@ def parse_delete_targets(target_str):
         elif part.isdigit():
             targets.append(int(part))
     
-    # Remove duplicates and sort in reverse (delete from bottom up to preserve indices)
     return sorted(list(set(targets)), reverse=True)
 
 def delete_transactions(targets, channel_id):
-    """Delete multiple transactions"""
     global last_deleted
     
     sheet = get_transaction_sheet()
@@ -685,12 +794,10 @@ def delete_transactions(targets, channel_id):
     
     transactions = get_all_transactions()
     
-    # Handle "last" or "last N"
     if targets and targets[0] == 'last':
         count = targets[1] if len(targets) > 1 else 1
         sorted_tx = sorted(transactions, key=lambda x: x['date'], reverse=True)
         targets = [i + 1 for i in range(min(count, len(sorted_tx)))]
-        # Update list results for proper indexing
         last_list_results[channel_id] = sorted_tx
     
     if channel_id not in last_list_results:
@@ -700,12 +807,10 @@ def delete_transactions(targets, channel_id):
     deleted_items = []
     deleted_rows_data = []
     
-    # Validate all targets first
     for idx in targets:
         if idx < 1 or idx > len(list_results):
             return False, f"Invalid number: {idx}. Use `list` first.", []
     
-    # Sort targets in reverse order (delete from bottom up)
     sorted_targets = sorted(targets, reverse=True)
     
     try:
@@ -719,12 +824,10 @@ def delete_transactions(targets, channel_id):
             sheet.delete_rows(tx['row_index'])
             deleted_items.append(tx)
             
-            # Adjust row indices for remaining items
             for item in list_results:
                 if item['row_index'] > tx['row_index']:
                     item['row_index'] -= 1
         
-        # Store for undo
         last_deleted[channel_id] = {
             'items': deleted_rows_data,
             'timestamp': datetime.now()
@@ -739,12 +842,12 @@ def undo_delete(channel_id):
     global last_deleted
     
     if channel_id not in last_deleted:
-        return False, "Nothing to undo", []
+        return False, "Nothing to undo (bot may have restarted)", []
     
     deleted_info = last_deleted[channel_id]
     time_diff = (datetime.now() - deleted_info['timestamp']).seconds
-    if time_diff > 300:
-        return False, "Undo expired (>5 minutes)", []
+    if time_diff > 600:  # Extended to 10 minutes
+        return False, "Undo expired (>10 minutes)", []
     
     sheet = get_transaction_sheet()
     if not sheet:
@@ -827,17 +930,6 @@ def get_monthly_summary(month=None):
         'total_expenses': sum(expenses.values())
     }
 
-def get_fixed_bills_total():
-    bills = get_fixed_bills_dict()
-    seen = set()
-    total = 0
-    for key, b in bills.items():
-        cat = b['category']
-        if cat not in seen:
-            seen.add(cat)
-            total += b['amount']
-    return total
-
 # ============== SLACK EVENT HANDLER ==============
 
 @app.route('/slack/events', methods=['POST'])
@@ -853,29 +945,20 @@ def slack_events():
     event = data.get('event', {})
     event_type = event.get('type')
     
-    # Skip bot messages
     if event.get('bot_id'):
         return jsonify({'ok': True})
     
-    # ===== DUPLICATE EVENT CHECK =====
     event_id = event.get('client_msg_id') or event.get('event_ts') or data.get('event_id')
     if is_duplicate_event(event_id):
-        return jsonify({'ok': True})  # Skip duplicate
+        return jsonify({'ok': True})
     
     if event_type == 'message':
         channel = event.get('channel')
         text = event.get('text', '').strip()
         user_id = event.get('user')
         
-        try:
-            user_info = slack_client.users_info(user=user_id)
-            user_name = user_info['user']['real_name'].split()[0]
-            if 'naomi' in user_name.lower() or 'nao' in user_name.lower() or 'thương' in user_name.lower():
-                user_name = 'Naomi'
-            else:
-                user_name = 'Jacob'
-        except:
-            user_name = 'Jacob'
+        # Better user detection
+        user_name = detect_user_name(user_id)
         
         text_lower = text.lower()
         
@@ -883,7 +966,7 @@ def slack_events():
         if text_lower in ['status', 'tình hình', 'báo cáo', 'check']:
             funds = get_fund_status()
             summary = get_monthly_summary()
-            fixed_total = get_fixed_bills_total()
+            has_loans = has_outstanding_loans()
             
             if funds or summary:
                 msg = "📊 *Status Update*\n\n"
@@ -893,7 +976,6 @@ def slack_events():
                     msg += f"*{month_name}:*\n"
                     msg += f"• Income: {fmt(summary['total_income'])}\n"
                     msg += f"• Expenses: {fmt(summary['total_expenses'])}\n"
-                    msg += f"• Fixed Bills (default): {fmt(fixed_total)}\n"
                     net = summary['total_income'] - summary['total_expenses']
                     msg += f"• Net: {fmt(net)}\n\n"
                 
@@ -906,6 +988,10 @@ def slack_events():
                     if emergency:
                         progress = (emergency / 15000000) * 100
                         msg += f"\n🎯 Emergency Fund: {progress:.1f}% → ₩15M"
+                
+                # Add loan reminder if any
+                if has_loans:
+                    msg += "\n\n⚠️ check loan - debt"
                 
                 slack_client.chat_postMessage(channel=channel, text=msg)
             else:
@@ -947,6 +1033,33 @@ def slack_events():
             msg += f"*Total: {fmt(total)}*"
             slack_client.chat_postMessage(channel=channel, text=msg)
         
+        # Command: list debt / list loan
+        elif text_lower in ['list debt', 'list loan', 'list nợ', 'list mượn']:
+            loans = get_outstanding_loans()
+            if loans:
+                last_debt_list[channel] = loans
+                msg = format_transaction_list(loans, "Loan & Debt", channel, is_debt_list=True)
+            else:
+                msg = "📋 No outstanding loans/debts! 🎉"
+            slack_client.chat_postMessage(channel=channel, text=msg)
+        
+        # Command: paid (mark loan as paid)
+        elif text_lower.startswith('paid'):
+            parts = text_lower.split()
+            if len(parts) < 2 or not parts[1].isdigit():
+                slack_client.chat_postMessage(channel=channel, text="❓ Usage: `paid 1` (mark loan #1 as paid)")
+                return jsonify({'ok': True})
+            
+            loan_index = int(parts[1]) - 1
+            success, result = mark_loan_as_paid(loan_index, channel)
+            
+            if success:
+                msg = f"✅ Paid: {fmt(result['amount'])} - {result['description']}\n"
+                msg += f"💰 Logged as income: nhận lại/trả nợ"
+                slack_client.chat_postMessage(channel=channel, text=msg)
+            else:
+                slack_client.chat_postMessage(channel=channel, text=f"❌ {result}")
+        
         # Command: list
         elif text_lower.startswith('list') or text_lower.startswith('last'):
             if text_lower.startswith('last'):
@@ -980,7 +1093,7 @@ def slack_events():
             msg = format_transaction_list(filtered, title, channel)
             slack_client.chat_postMessage(channel=channel, text=msg)
         
-        # Command: delete (supports multiple)
+        # Command: delete
         elif text_lower.startswith('delete'):
             target_str = text_lower.replace('delete', '').strip()
             
@@ -1001,7 +1114,7 @@ def slack_events():
                     msg = f"🗑️ Deleted: {deleted_items[0]['category']} - {fmt(deleted_items[0]['amount'])}\n"
                 else:
                     msg = f"🗑️ Deleted {len(deleted_items)} items:\n"
-                    for item in deleted_items[:5]:  # Show max 5
+                    for item in deleted_items[:5]:
                         msg += f"  • {item['category']} - {fmt(item['amount'])}\n"
                     if len(deleted_items) > 5:
                         msg += f"  ... and {len(deleted_items) - 5} more\n"
@@ -1061,30 +1174,33 @@ def slack_events():
         
         # Command: help
         elif text_lower in ['help', 'trợ giúp', '?']:
-            help_msg = """🤖 *Finance Bot V5.1*
+            help_msg = """🤖 *Finance Bot V5.2*
 
 *➕ Add Transaction:*
 • `salary 2m` - Log income
 • `50K cà phê` - Log expense
 • `jacob 2.8M salary` - Specify person
 • `gas dec 150K` - Backdate to month
+• `50K cho sơn mượn` - Log loan
 
 *📋 List:*
 • `list` - This month
+• `list expense` - Expenses only
 • `list dec` - December
-• `list gas 5` - Last 5 gas bills
+• `list debt` - Outstanding loans
 • `last 5` - Last 5 transactions
 
-*🗑️ Delete (single or multiple):*
-• `delete 1` - Delete item #1
-• `delete 1,2,3` - Delete multiple
-• `delete 1-5` - Delete range
-• `delete last` - Delete most recent
-• `delete last 3` - Delete last 3
+*🗑️ Delete:*
+• `delete 1` or `delete 1,2,3` or `delete 1-5`
+• `delete last` or `delete last 3`
+
+*💰 Loans:*
+• `list debt` - See all loans
+• `paid 1` - Mark loan #1 as repaid
 
 *✏️ Edit & Undo:*
 • `edit 1 150K` - Change amount
-• `undo` - Restore deleted items
+• `undo` - Restore deleted
 
 *📊 Status:*
 • `status` - Summary + funds
@@ -1095,7 +1211,6 @@ def slack_events():
         else:
             tx = parse_transaction(text, user_name)
             if tx:
-                # Check for duplicate income
                 duplicate = check_duplicate_income(tx)
                 
                 success, msg = log_transaction(tx)
@@ -1109,7 +1224,7 @@ def slack_events():
 
 @app.route('/', methods=['GET'])
 def health():
-    return jsonify({'status': 'ok', 'bot': 'Couple Finance Bot V5.1'})
+    return jsonify({'status': 'ok', 'bot': 'Couple Finance Bot V5.2'})
 
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 3000))

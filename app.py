@@ -402,21 +402,36 @@ def get_emoji(category, category_data, is_income_tx):
 # ============== USER DETECTION ==============
 
 def detect_user_name(user_id):
-    """Detect if user is Jacob or Naomi with better Vietnamese name support"""
+    """Detect if user is Jacob or Naomi with better name field support"""
     try:
         user_info = slack_client.users_info(user=user_id)
-        display_name = user_info['user'].get('real_name', '').lower()
-        username = user_info['user'].get('name', '').lower()
+        user = user_info.get('user', {})
+        profile = user.get('profile', {})
+        
+        # Get ALL possible name fields from Slack
+        names_to_check = [
+            user.get('real_name', ''),
+            user.get('name', ''),
+            profile.get('display_name', ''),
+            profile.get('real_name', ''),
+            profile.get('first_name', ''),
+        ]
+        
+        # Combine all names into one string for checking
+        all_names = ' '.join(names_to_check).lower()
         
         # Check for Naomi indicators (including Vietnamese names)
-        naomi_indicators = ['naomi', 'nao', 'thương', 'thuong', 'bùi', 'bui', 'thươngbùi', 'thuongbui']
+        naomi_indicators = ['naomi', 'nao', 'thương', 'thuong', 'bùi', 'bui', 'thươngbùi', 'thuongbui', 'thuơng']
         
         for indicator in naomi_indicators:
-            if indicator in display_name or indicator in username:
+            if indicator in all_names:
                 return 'Naomi'
         
+        # Default to Jacob
         return 'Jacob'
-    except:
+    except Exception as e:
+        # Log error but default to Jacob
+        print(f"Error detecting user: {e}")
         return 'Jacob'
 
 # ============== DUPLICATE INCOME CHECK ==============
@@ -467,9 +482,12 @@ def get_outstanding_loans():
                 loans.append({
                     'row_index': i + 2,
                     'date': row.get('Date', ''),
+                    'type': 'Expense',
+                    'category': 'Loan & Debt',
                     'amount': row.get('Amount', 0),
                     'description': row.get('Description', ''),
                     'person': row.get('Person', ''),
+                    'month': row.get('Month', ''),
                 })
     
     return loans

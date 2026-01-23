@@ -1,6 +1,7 @@
 import os
 import re
 import json
+import random
 from datetime import datetime
 from flask import Flask, request, jsonify
 from slack_sdk import WebClient
@@ -19,32 +20,147 @@ GOOGLE_SHEET_ID = os.environ.get('GOOGLE_SHEET_ID', '1CRWaO855R-_8GKR2Pwpqw28ZFW
 slack_client = WebClient(token=SLACK_BOT_TOKEN)
 signature_verifier = SignatureVerifier(SLACK_SIGNING_SECRET)
 
-# Store last deleted transaction for undo (in memory - resets on restart)
+# Store last deleted transaction for undo
 last_deleted = {}
-
 # Store last list results for delete by number
 last_list_results = {}
 
-# Month name mappings
+# ============== MASTER CATEGORIES ==============
+CATEGORIES = {
+    'Food & Dining': {
+        'keywords': ['eat', 'dinner', 'lunch', 'breakfast', 'restaurant', 'coffee', 'cafe', 'meal', 'food',
+                     'ăn', 'cơm', 'phở', 'bún', 'bánh mì', 'cà phê', 'cafe', 'nhà hàng', 'ăn trưa', 'ăn tối', 
+                     'ăn sáng', 'quán', 'gọi đồ ăn', 'delivery', 'đặt đồ ăn', 'ăn vặt', 'trà sữa', 'kem', 
+                     'lẩu', 'nướng', 'bbq', 'thịt nướng', 'samgyupsal', 'chimaek', 'chicken', 'gà rán',
+                     'bún bò', 'bún chả', 'bánh cuốn', 'chè', 'snack', 'đồ ăn'],
+        'emoji': ['🍜', '☕', '🍕', '🍔', '🍱'],
+        'responses': ["Yummy! 😋", "맛있게 드세요!", "Ăn ngon nha!", "Enjoy your meal! 🍴", "Tasty! 😄"]
+    },
+    'Groceries': {
+        'keywords': ['grocery', 'groceries', 'market', 'supermarket', 'mart',
+                     'đi chợ', 'siêu thị', 'thực phẩm', 'coupang', '쿠팡', 'emart', 'homeplus', 
+                     'lotte mart', 'rau', 'thịt', 'trứng', 'sữa', 'gạo', 'chợ'],
+        'emoji': ['🛒', '🥬', '🥚'],
+        'responses': ["Stocking up! 🛒", "Coupang delivery? 📦", "Fresh groceries! 🥬"]
+    },
+    'Transport': {
+        'keywords': ['grab', 'taxi', 'bus', 'subway', 'train', 'ktx', 'parking', 'toll',
+                     'xe', '택시', 'xe buýt', 'tàu điện', '지하철', 'gửi xe', 'đỗ xe', 
+                     'phí cầu đường', 'xăng', 'đổ xăng', 'uber', 'kakao taxi', 'đi lại'],
+        'emoji': ['🚕', '🚇', '🚗'],
+        'responses': ["Safe travels! 🚗", "Đi cẩn thận nha!", "On the move! 🚇"]
+    },
+    'Gift': {
+        'keywords': ['gift', 'present', 'wedding gift', 'birthday', 'baby shower',
+                     'quà', 'tặng', 'quà cưới', 'mừng cưới', 'quà sinh nhật', 'sinh nhật', 
+                     'đám cưới', '돌잔치', 'thôi nôi', 'quà tân gia', 'tặng bạn', 'mừng'],
+        'emoji': ['🎁', '💝', '🎀'],
+        'responses': ["So thoughtful! 💕", "Người nhận sẽ vui lắm!", "Nice gift! 🎁", "Generous! 💝"]
+    },
+    'Family Support': {
+        'keywords': ['mom', 'dad', 'parents', 'family', 'send home',
+                     'cho mẹ', 'cho ba', 'biếu', 'hỗ trợ gia đình', 'gửi về', 'gửi tiền', 
+                     'tiền nhà', 'bố mẹ', 'gia đình', 'cho bố', 'mẹ', 'ba', 'bố'],
+        'emoji': ['👨‍👩‍👧', '❤️', '🏠'],
+        'responses': ["Family first! ❤️", "Hiếu thảo quá! 👏", "Family love! 👨‍👩‍👧"]
+    },
+    'Date': {
+        'keywords': ['date', 'dating', 'couple', 'anniversary', 'romantic', 'valentine',
+                     'hẹn hò', 'kỷ niệm', 'lãng mạn', 'đi chơi hai đứa', 'tình yêu'],
+        'emoji': ['💑', '🥰', '💕'],
+        'responses': ["Enjoy your date! 💕", "Have fun you two! 🥰", "Love is in the air! 💑"]
+    },
+    'Entertainment': {
+        'keywords': ['movie', 'game', 'netflix', 'concert', 'karaoke', 'pc bang',
+                     'phim', 'xem phim', 'giải trí', 'game', '노래방', 'pc방', 'youtube', 'spotify'],
+        'emoji': ['🎬', '🎮', '🎤'],
+        'responses': ["Have fun! 🎉", "Giải trí xíu! 🎬", "Enjoy! 🎮"]
+    },
+    'Shopping': {
+        'keywords': ['buy', 'purchase', 'clothes', 'shoes', 'daiso', 'olive young', 'shop',
+                     'mua', 'quần áo', 'giày dép', 'shopping', 'mỹ phẩm', 'skincare', 
+                     '다이소', '올리브영', 'mua sắm', 'đồ', 'áo', 'quần'],
+        'emoji': ['🛍️', '👗', '👟'],
+        'responses': ["Treat yourself! 🛍️", "Shopping therapy! 💅", "Nice buy! 👍"]
+    },
+    'Travel': {
+        'keywords': ['flight', 'ticket', 'hotel', 'travel', 'trip', 'airbnb', 'booking',
+                     'vé máy bay', 'vé', 'khách sạn', 'du lịch', 'về việt nam', 'về quê', 
+                     'bay', 'book', 'đặt phòng', 'resort', 'nghỉ dưỡng'],
+        'emoji': ['✈️', '🧳', '🏖️'],
+        'responses': ["Bon voyage! ✈️", "Safe travels!", "Du lịch vui nha! 🌴", "Về quê! 🇻🇳❤️"]
+    },
+    'Healthcare': {
+        'keywords': ['doctor', 'hospital', 'medicine', 'pharmacy', 'clinic', 'health',
+                     'bác sĩ', 'thuốc', 'bệnh viện', '병원', '약국', 'khám bệnh', 'hiệu thuốc',
+                     'vitamin', 'sick', 'ốm', 'bệnh'],
+        'emoji': ['💊', '🏥', '💪'],
+        'responses': ["Health is wealth! 💪", "Get well soon!", "Take care! 🏥"]
+    },
+    'Loan & Debt': {
+        'keywords': ['lend', 'borrow', 'debt', 'loan', 'repay', 'pay back',
+                     'cho mượn', 'mượn', 'trả nợ', 'vay', 'nợ', 'trả lại', 'cho vay'],
+        'emoji': ['💸', '🤝', '📝'],
+        'responses': ["Noted! 📝", "Good to track this 💸", "Money matters! 🤝"]
+    },
+    'Business': {
+        'keywords': ['ads', 'contractor', 'client', 'marketing', 'revenue', 'business',
+                     'quảng cáo', 'cộng tác viên', 'khách hàng', 'doanh thu', 'công việc',
+                     'ad spend', 'facebook ads', 'campaign'],
+        'emoji': ['💼', '📈', '💹'],
+        'responses': ["Business expense logged! 💼", "Invest to grow! 📈", "Business moves! 💹"]
+    },
+    'Subscription': {
+        'keywords': ['subscription', 'monthly', 'netflix', 'spotify', 'claude', 'chatgpt',
+                     'đăng ký', 'gói tháng', 'youtube premium', 'disney', 'apple'],
+        'emoji': ['📱', '💳', '🔄'],
+        'responses': ["Subscription noted! 📱", "Monthly fee logged! 💳"]
+    },
+    'Housing': {
+        'keywords': ['rent', 'deposit', 'maintenance', '관리비', '월세', 'apartment',
+                     'tiền nhà', 'thuê nhà', 'đặt cọc', 'bảo trì', 'nhà', 'phòng'],
+        'emoji': ['🏠', '🔑', '🏢'],
+        'responses': ["Home sweet home! 🏠", "Housing cost noted! 🔑"]
+    },
+    'Education': {
+        'keywords': ['course', 'class', 'book', 'study', 'korean class', 'learn', 'school',
+                     'học', 'khóa học', 'lớp', 'sách', 'học tiếng hàn', '한국어', 'tiếng hàn'],
+        'emoji': ['📚', '🎓', '✏️'],
+        'responses': ["Invest in yourself! 📚", "Knowledge is power! 🎓", "Keep learning! ✏️"]
+    },
+    'Pet': {
+        'keywords': ['pet', 'cat', 'dog', 'vet', 'mèo', 'chó', 'thú cưng', 'thú y', 'pet food'],
+        'emoji': ['🐱', '🐕', '🐾'],
+        'responses': ["For the fur baby! 🐾", "Pet parent life! 🐱"]
+    },
+    'Income': {
+        'keywords': ['salary', 'commission', 'bonus', 'income', 'fee', 'revenue', 'wage', 'pay',
+                     'lương', 'hoa hồng', 'thưởng', 'thu nhập', 'tiền lương'],
+        'emoji': ['💰', '🎉', '💵'],
+        'responses': ["Money in! 💰", "Cha-ching! 🎉", "Nice! Keep it coming! 💪", "Pay day! 💵"]
+    },
+}
+
+# Income keywords for type detection
+INCOME_KEYWORDS = ['salary', 'commission', 'bonus', 'income', 'fee', 'revenue', 'wage', 'pay',
+                   'lương', 'hoa hồng', 'thưởng', 'thu nhập', 'tiền lương', 'ad management fee']
+
+# Month mappings
 MONTH_NAMES = {
-    'jan': 1, 'january': 1, 'thg1': 1,
-    'feb': 2, 'february': 2, 'thg2': 2,
-    'mar': 3, 'march': 3, 'thg3': 3,
-    'apr': 4, 'april': 4, 'thg4': 4,
-    'may': 5, 'thg5': 5,
-    'jun': 6, 'june': 6, 'thg6': 6,
-    'jul': 7, 'july': 7, 'thg7': 7,
-    'aug': 8, 'august': 8, 'thg8': 8,
-    'sep': 9, 'sept': 9, 'september': 9, 'thg9': 9,
-    'oct': 10, 'october': 10, 'thg10': 10,
-    'nov': 11, 'november': 11, 'thg11': 11,
-    'dec': 12, 'december': 12, 'thg12': 12,
+    'jan': 1, 'january': 1, 'feb': 2, 'february': 2, 'mar': 3, 'march': 3,
+    'apr': 4, 'april': 4, 'may': 5, 'jun': 6, 'june': 6,
+    'jul': 7, 'july': 7, 'aug': 8, 'august': 8, 'sep': 9, 'sept': 9, 'september': 9,
+    'oct': 10, 'october': 10, 'nov': 11, 'november': 11, 'dec': 12, 'december': 12,
+    'thg1': 1, 'thg2': 2, 'thg3': 3, 'thg4': 4, 'thg5': 5, 'thg6': 6,
+    'thg7': 7, 'thg8': 8, 'thg9': 9, 'thg10': 10, 'thg11': 11, 'thg12': 12,
 }
 
 MONTH_NAMES_REVERSE = {
     1: 'Jan', 2: 'Feb', 3: 'Mar', 4: 'Apr', 5: 'May', 6: 'Jun',
     7: 'Jul', 8: 'Aug', 9: 'Sep', 10: 'Oct', 11: 'Nov', 12: 'Dec'
 }
+
+# ============== HELPER FUNCTIONS ==============
 
 def get_gsheet_client():
     creds_json = os.environ.get('GOOGLE_CREDENTIALS')
@@ -70,25 +186,48 @@ def get_transaction_sheet():
 def get_fixed_bills_sheet():
     return get_sheet('Fixed Bills')
 
-# Parse amount
 def parse_amount(amount_str):
-    amount_str = amount_str.replace(',', '').replace('₩', '').strip()
-    if 'M' in amount_str.upper():
-        return int(float(amount_str.upper().replace('M', '')) * 1000000)
-    elif 'K' in amount_str.upper():
-        return int(float(amount_str.upper().replace('K', '')) * 1000)
-    return int(float(amount_str))
+    """Parse amount from string like 2.8M, 500K, 2800000"""
+    amount_str = str(amount_str).replace(',', '').replace('₩', '').replace(' ', '').strip()
+    match = re.match(r'^([\d.]+)([mkMK]?)$', amount_str)
+    if match:
+        num = float(match.group(1))
+        suffix = match.group(2).upper()
+        if suffix == 'M':
+            return int(num * 1000000)
+        elif suffix == 'K':
+            return int(num * 1000)
+        return int(num)
+    return None
 
-# Format currency
 def fmt(amount):
+    """Format amount for display"""
     if amount >= 1000000:
         return f"₩{amount/1000000:.1f}M"
     elif amount >= 1000:
         return f"₩{amount/1000:.0f}K"
     return f"₩{amount:,.0f}"
 
-# Parse month from text
+def extract_amount_from_text(text):
+    """Find and extract amount from anywhere in text, return (amount, remaining_text)"""
+    # Pattern to find amount anywhere in text
+    pattern = r'([\d.,]+[mkMK]?|\d{4,})'
+    
+    words = text.split()
+    amount = None
+    remaining_words = []
+    
+    for word in words:
+        parsed = parse_amount(word)
+        if parsed and amount is None:
+            amount = parsed
+        else:
+            remaining_words.append(word)
+    
+    return amount, ' '.join(remaining_words)
+
 def parse_month(text):
+    """Parse month from text like 'dec', '2025-12'"""
     text = text.lower().strip()
     now = datetime.now()
     
@@ -96,26 +235,20 @@ def parse_month(text):
     if match:
         return int(match.group(1)), int(match.group(2))
     
-    match = re.match(r'^(\d{1,2})/(\d{4})$', text)
-    if match:
-        return int(match.group(2)), int(match.group(1))
-    
     if text in MONTH_NAMES:
         month = MONTH_NAMES[text]
-        year = now.year
-        if month > now.month:
-            year -= 1
+        year = now.year if month <= now.month else now.year - 1
         return year, month
     
     return None
 
-# Extract month from text
 def extract_month_from_text(text):
+    """Extract month reference from text, return (cleaned_text, year, month, is_backdated)"""
     words = text.split()
     now = datetime.now()
     
     for i, word in enumerate(words):
-        month_info = parse_month(word)
+        month_info = parse_month(word.lower())
         if month_info:
             year, month = month_info
             cleaned_words = words[:i] + words[i+1:]
@@ -125,8 +258,46 @@ def extract_month_from_text(text):
     
     return text, now.year, now.month, False
 
-# Get fixed bills dictionary
+def extract_person_from_text(text):
+    """Extract person (jacob/naomi/joint) from text"""
+    words = text.lower().split()
+    person = None
+    remaining_words = []
+    
+    for word in words:
+        if word in ['jacob', 'naomi', 'joint']:
+            person = word.capitalize()
+        else:
+            remaining_words.append(word)
+    
+    return person, ' '.join(remaining_words)
+
+def detect_category(text):
+    """Detect category from text based on keywords"""
+    text_lower = text.lower()
+    
+    for category, data in CATEGORIES.items():
+        for keyword in data['keywords']:
+            if keyword in text_lower:
+                return category, data
+    
+    return 'Other', {'emoji': ['📝'], 'responses': ["Logged! 📝"]}
+
+def is_income(text, category):
+    """Check if transaction is income based on keywords"""
+    text_lower = text.lower()
+    
+    if category == 'Income':
+        return True
+    
+    for keyword in INCOME_KEYWORDS:
+        if keyword in text_lower:
+            return True
+    
+    return False
+
 def get_fixed_bills_dict():
+    """Get fixed bills from sheet"""
     sheet = get_fixed_bills_sheet()
     if not sheet:
         return {}
@@ -140,40 +311,37 @@ def get_fixed_bills_dict():
             key = category.lower().strip()
             simple_key = key.split(' - ')[0].split(' ')[0]
             
-            bills[key] = {
+            bill_data = {
                 'category': category,
                 'amount': row.get('Amount', 0),
                 'type': row.get('Type', 'Personal'),
                 'person': row.get('Person', 'Joint'),
-                'auto_include': row.get('Auto_Include', 'No')
             }
+            bills[key] = bill_data
             if simple_key != key:
-                bills[simple_key] = bills[key]
+                bills[simple_key] = bill_data
     
     return bills
 
-# Find matching fixed bill
 def find_fixed_bill(text):
+    """Check if text matches a fixed bill"""
     bills = get_fixed_bills_dict()
     text_lower = text.lower().strip()
     
+    # Direct match
     if text_lower in bills:
         return bills[text_lower]
     
+    # Partial match
     for key, bill in bills.items():
         if text_lower in key or key in text_lower:
             return bill
     
+    # Aliases
     aliases = {
-        'gas': 'gas', 'điện': 'electricity', 'electric': 'electricity',
-        'electricity': 'electricity', 'internet': 'internet', 'wifi': 'internet',
-        'rent': 'rent', 'nhà': 'rent', 'phone': 'phone', 'điện thoại': 'phone',
-        'groceries': 'groceries', 'grocery': 'groceries', 'đi chợ': 'groceries',
-        'eating': 'eating out', 'ăn ngoài': 'eating out', 'dinner': 'eating out',
-        'transport': 'transport', 'đi lại': 'transport', 'disney': 'disney +',
-        'youtube': 'youtube premium', 'claude': 'claude pro',
-        'chatgpt': 'chatgpt pro', 'microsoft': 'microsoft 365', 'canva': 'canva pro',
-        'icloud': 'icloud storage', 'insurance': 'health insurance', 'bảo hiểm': 'health insurance',
+        'gas': 'gas', 'electricity': 'electricity', 'electric': 'electricity',
+        'internet': 'internet', 'wifi': 'internet', 'rent': 'rent',
+        'điện': 'electricity', 'nước': 'water', 'mạng': 'internet',
     }
     
     if text_lower in aliases:
@@ -184,67 +352,96 @@ def find_fixed_bill(text):
     
     return None
 
-# Parse transaction
-def parse_transaction(text, user_name):
-    text = text.strip()
-    cleaned_text, year, month, is_backdated = extract_month_from_text(text)
+def get_personality_response(category, category_data, amount, is_income):
+    """Get a random personality response (50% chance)"""
+    if random.random() > 0.5:  # 50% chance to add personality
+        return ""
     
-    patterns = [
-        r'^(jacob|naomi|joint)\s+([\d.,]+[mk]?)\s+(.+)$',
-        r'^([\d.,]+[mk]?)\s+(.+)$',
-        r'^([a-zA-Z\s]+)\s+([\d.,]+[mk]?)$',
-    ]
+    responses = category_data.get('responses', ["Logged! 📝"])
     
-    person = user_name
-    amount = None
-    description = None
-    fixed_bill = None
+    # Special responses for big amounts
+    if is_income and amount >= 5000000:
+        return random.choice(["🎊 WOW! Amazing! 🚀", "Big income! 💰💰💰", "Incredible! Keep it up! 🔥"])
     
-    match = re.match(patterns[0], cleaned_text, re.IGNORECASE)
-    if match:
-        person = match.group(1).capitalize()
-        amount = parse_amount(match.group(2))
-        description = match.group(3).strip()
-    else:
-        match = re.match(patterns[2], cleaned_text, re.IGNORECASE)
-        if match:
-            potential_category = match.group(1).strip()
-            fixed_bill = find_fixed_bill(potential_category)
-            if fixed_bill:
-                amount = parse_amount(match.group(2))
-                description = fixed_bill['category']
-                person = fixed_bill['person'] if fixed_bill['person'] != 'Both' else 'Joint'
-        
-        if not amount:
-            match = re.match(patterns[1], cleaned_text, re.IGNORECASE)
-            if match:
-                amount = parse_amount(match.group(1))
-                description = match.group(2).strip()
+    if not is_income and amount >= 1000000:
+        return random.choice(["Big purchase! 🛒", "That's a big one! 💸"])
     
-    if amount and description:
-        income_keywords = ['salary', 'commission', 'bonus', 'income', 'fee', 'revenue', 'lương', 'hoa hồng', 'thưởng']
-        
-        tx_type = 'Expense'
-        for kw in income_keywords:
-            if kw in description.lower():
-                tx_type = 'Income'
-                break
-        
-        return {
-            'person': person,
-            'amount': amount,
-            'description': description,
-            'type': tx_type,
-            'fixed_bill': fixed_bill,
-            'year': year,
-            'month': month,
-            'is_backdated': is_backdated
-        }
-    
-    return None
+    return random.choice(responses)
 
-# Log transaction
+def get_emoji(category, category_data, is_income):
+    """Get emoji for category"""
+    if is_income:
+        return random.choice(['💰', '💵', '🎉'])
+    return random.choice(category_data.get('emoji', ['📝']))
+
+# ============== TRANSACTION PARSING ==============
+
+def parse_transaction(text, user_name):
+    """
+    Parse transaction from flexible input formats:
+    - salary 2m
+    - 2m salary
+    - jacob 2.8M salary
+    - naomi salary 2m
+    - 50K cà phê
+    - gas dec 150K
+    - 150K quà cưới chị A
+    """
+    original_text = text.strip()
+    
+    # Step 1: Extract month if present
+    text, year, month, is_backdated = extract_month_from_text(original_text)
+    
+    # Step 2: Extract person if present
+    person, text = extract_person_from_text(text)
+    if not person:
+        person = user_name
+    
+    # Step 3: Extract amount
+    amount, description = extract_amount_from_text(text)
+    
+    if not amount:
+        return None
+    
+    # Step 4: Clean up description
+    description = description.strip()
+    if not description:
+        description = "Transaction"
+    
+    # Step 5: Check if it's a fixed bill
+    fixed_bill = find_fixed_bill(description)
+    
+    # Step 6: Detect category
+    if fixed_bill:
+        category = fixed_bill['category']
+        category_data = {'emoji': ['📋'], 'responses': ["Fixed bill logged! 📋"]}
+        if fixed_bill['person'] != 'Both':
+            person = fixed_bill['person']
+        else:
+            person = 'Joint'
+    else:
+        category, category_data = detect_category(description)
+    
+    # Step 7: Determine if income or expense
+    tx_is_income = is_income(description, category)
+    
+    return {
+        'person': person,
+        'amount': amount,
+        'description': description,
+        'category': category,
+        'category_data': category_data,
+        'type': 'Income' if tx_is_income else 'Expense',
+        'fixed_bill': fixed_bill,
+        'year': year,
+        'month': month,
+        'is_backdated': is_backdated
+    }
+
+# ============== TRANSACTION LOGGING ==============
+
 def log_transaction(tx_data):
+    """Log transaction to Google Sheet"""
     sheet = get_transaction_sheet()
     if not sheet:
         return False, "Cannot connect to Google Sheets"
@@ -260,21 +457,71 @@ def log_transaction(tx_data):
     month_start = f"{year}-{month:02d}-01"
     
     row = [
-        date_str,
-        tx_data['type'],
-        tx_data['description'],
-        tx_data['amount'],
-        tx_data['description'],
-        tx_data['person'],
-        month_start,
-        'slack'
+        date_str,                    # Date
+        tx_data['type'],             # Type (Income/Expense)
+        tx_data['category'],         # Category (smart detected)
+        tx_data['amount'],           # Amount
+        tx_data['description'],      # Description (original text)
+        tx_data['person'],           # Person
+        month_start,                 # Month
+        'slack'                      # Source
     ]
     
     sheet.append_row(row)
     return True, "Transaction logged!"
 
-# Get all transactions
+def build_response(tx_data):
+    """Build response message with personality"""
+    category = tx_data['category']
+    category_data = tx_data.get('category_data', {})
+    amount = tx_data['amount']
+    description = tx_data['description']
+    is_income = tx_data['type'] == 'Income'
+    is_backdated = tx_data.get('is_backdated', False)
+    year = tx_data.get('year')
+    month = tx_data.get('month')
+    fixed_bill = tx_data.get('fixed_bill')
+    
+    # Get emoji
+    emoji = get_emoji(category, category_data, is_income)
+    
+    # Build main response
+    response = f"{emoji} Logged: {category} - {fmt(amount)}\n"
+    response += f"📝 {description}\n"
+    
+    # Add backdate info
+    if is_backdated:
+        month_name = f"{MONTH_NAMES_REVERSE[month]} {year}"
+        response += f"📅 {month_name} (backdated)\n"
+    
+    # Add fixed bill comparison
+    if fixed_bill:
+        default_amount = fixed_bill['amount']
+        if default_amount > 0:
+            ratio = amount / default_amount
+            
+            if ratio > 2:
+                response += f"📊 Usually {fmt(default_amount)} - this is {ratio:.0f}x higher!\n"
+                if 'gas' in category.lower():
+                    response += "🔥 Winter heating?"
+                elif 'electric' in category.lower():
+                    response += "❄️ AC or heating?"
+            elif ratio > 1.2:
+                response += f"📊 {fmt(amount - default_amount)} more than usual"
+            elif ratio < 0.5:
+                response += f"📊 Usually {fmt(default_amount)} - nice savings! 🎉"
+    
+    # Add personality (50% chance)
+    personality = get_personality_response(category, category_data, amount, is_income)
+    if personality:
+        response += f"\n{personality}"
+    
+    return response
+
+# ============== LIST/DELETE/EDIT FUNCTIONS ==============
+
 def get_all_transactions():
+    """Get all transactions from sheet"""
     sheet = get_transaction_sheet()
     if not sheet:
         return []
@@ -286,7 +533,7 @@ def get_all_transactions():
         tx_type = row.get('Type', '')
         if tx_type in ['Income', 'Expense']:
             transactions.append({
-                'row_index': i + 2,  # +2 because header is row 1, and gspread is 1-indexed
+                'row_index': i + 2,
                 'date': row.get('Date', ''),
                 'type': tx_type,
                 'category': row.get('Category', ''),
@@ -294,20 +541,20 @@ def get_all_transactions():
                 'description': row.get('Description', ''),
                 'person': row.get('Person', ''),
                 'month': row.get('Month', ''),
-                'source': row.get('Source', '')
             })
     
     return transactions
 
-# Filter transactions
 def filter_transactions(transactions, filter_type=None, filter_category=None, filter_person=None, filter_month=None, limit=None):
+    """Filter transactions based on criteria"""
     filtered = transactions
     
     if filter_type:
         filtered = [t for t in filtered if t['type'].lower() == filter_type.lower()]
     
     if filter_category:
-        filtered = [t for t in filtered if filter_category.lower() in t['category'].lower()]
+        filtered = [t for t in filtered if filter_category.lower() in t['category'].lower() or 
+                    filter_category.lower() in t['description'].lower()]
     
     if filter_person:
         filtered = [t for t in filtered if t['person'].lower() == filter_person.lower()]
@@ -315,7 +562,6 @@ def filter_transactions(transactions, filter_type=None, filter_category=None, fi
     if filter_month:
         filtered = [t for t in filtered if t['month'][:7] == filter_month]
     
-    # Sort by date descending (newest first)
     filtered = sorted(filtered, key=lambda x: x['date'], reverse=True)
     
     if limit:
@@ -323,12 +569,8 @@ def filter_transactions(transactions, filter_type=None, filter_category=None, fi
     
     return filtered
 
-# Parse list command
 def parse_list_command(text):
-    """
-    Parse: list, list dec, list gas, list gas 5, list expense, list jacob dec
-    Returns: (filter_type, filter_category, filter_person, filter_month, limit)
-    """
+    """Parse list command parameters"""
     words = text.lower().split()[1:]  # Remove 'list'
     
     filter_type = None
@@ -340,42 +582,34 @@ def parse_list_command(text):
     now = datetime.now()
     
     for word in words:
-        # Check if it's a number (limit)
         if word.isdigit():
             limit = int(word)
-        # Check if it's a month
         elif word in MONTH_NAMES:
             month_num = MONTH_NAMES[word]
             year = now.year if month_num <= now.month else now.year - 1
             filter_month = f"{year}-{month_num:02d}"
-        # Check if it's a type
         elif word in ['income', 'expense']:
             filter_type = word.capitalize()
-        # Check if it's a person
         elif word in ['jacob', 'naomi', 'joint']:
             filter_person = word.capitalize()
-        # Otherwise it's a category
         else:
             filter_category = word
     
-    # Default: if no month specified and no category, show current month
     if not filter_month and not filter_category and not limit:
         filter_month = now.strftime('%Y-%m')
     
     return filter_type, filter_category, filter_person, filter_month, limit
 
-# Format transaction list
 def format_transaction_list(transactions, title, channel_id):
+    """Format transaction list for display"""
     if not transactions:
         return "📋 No transactions found."
     
-    # Store for later delete/edit reference
     last_list_results[channel_id] = transactions
     
     msg = f"📋 *{title}:*\n\n"
-    total = 0
     
-    for i, tx in enumerate(transactions, 1):
+    for i, tx in enumerate(transactions[:20], 1):  # Limit to 20
         date_str = tx['date'][:10]
         try:
             date_obj = datetime.strptime(date_str, '%Y-%m-%d')
@@ -385,24 +619,24 @@ def format_transaction_list(transactions, title, channel_id):
         
         emoji = "💵" if tx['type'] == 'Income' else "💸"
         amount = tx['amount'] or 0
-        total += amount if tx['type'] == 'Income' else -amount
         
         msg += f"{i}. {emoji} {date_display} | {tx['category']} | {fmt(amount)} | {tx['person']}\n"
     
-    msg += f"\n*To delete: * `delete 1` or `delete last`"
-    msg += f"\n*To edit amount: * `edit 1 150K`"
+    if len(transactions) > 20:
+        msg += f"\n... and {len(transactions) - 20} more"
+    
+    msg += f"\n\n*Delete:* `delete 1` | *Edit:* `edit 1 150K`"
     
     return msg
 
-# Delete transaction by row index
 def delete_transaction(row_index, channel_id):
+    """Delete transaction by row index"""
     global last_deleted
     
     sheet = get_transaction_sheet()
     if not sheet:
         return False, "Cannot connect to Google Sheets"
     
-    # Get the row data before deleting (for undo)
     try:
         row_data = sheet.row_values(row_index)
         last_deleted[channel_id] = {
@@ -415,16 +649,14 @@ def delete_transaction(row_index, channel_id):
     except Exception as e:
         return False, str(e)
 
-# Undo delete
 def undo_delete(channel_id):
+    """Undo last delete"""
     global last_deleted
     
     if channel_id not in last_deleted:
         return False, "Nothing to undo"
     
     deleted_info = last_deleted[channel_id]
-    
-    # Check if undo is within 5 minutes
     time_diff = (datetime.now() - deleted_info['timestamp']).seconds
     if time_diff > 300:
         return False, "Undo expired (>5 minutes)"
@@ -440,73 +672,23 @@ def undo_delete(channel_id):
     except Exception as e:
         return False, str(e)
 
-# Edit transaction
 def edit_transaction(row_index, new_amount):
+    """Edit transaction amount"""
     sheet = get_transaction_sheet()
     if not sheet:
         return False, "Cannot connect to Google Sheets"
     
     try:
-        # Amount is in column D (4th column)
         old_value = sheet.cell(row_index, 4).value
         sheet.update_cell(row_index, 4, new_amount)
         return True, old_value
     except Exception as e:
         return False, str(e)
 
-# Build response for fixed bill
-def build_fixed_bill_response(tx_data):
-    fixed_bill = tx_data.get('fixed_bill')
-    amount = tx_data['amount']
-    category = tx_data['description']
-    is_backdated = tx_data.get('is_backdated', False)
-    year = tx_data.get('year')
-    month = tx_data.get('month')
-    
-    response = f"✅ Logged: {category} {fmt(amount)}\n"
-    
-    if is_backdated:
-        month_name = f"{MONTH_NAMES_REVERSE[month]} {year}"
-        response += f"📅 {month_name} (backdated)\n"
-    
-    if fixed_bill:
-        default_amount = fixed_bill['amount']
-        if default_amount > 0:
-            ratio = amount / default_amount
-            
-            if ratio > 2:
-                response += f"📊 Usually {fmt(default_amount)} - this is {ratio:.0f}x higher!\n"
-                if 'gas' in category.lower():
-                    response += "🔥 Winter heating? (Default unchanged)"
-                elif 'electric' in category.lower():
-                    response += "❄️ AC or heating? (Default unchanged)"
-                else:
-                    response += "(Default unchanged)"
-            elif ratio > 1.2:
-                response += f"📊 {fmt(amount - default_amount)} more than usual ({fmt(default_amount)})"
-            elif ratio < 0.5:
-                response += f"📊 Usually {fmt(default_amount)} - nice savings! 🎉"
-            elif ratio < 0.8:
-                response += f"📊 {fmt(default_amount - amount)} less than usual ({fmt(default_amount)})"
-    
-    return response
+# ============== STATUS FUNCTIONS ==============
 
-# Build response for regular transaction
-def build_transaction_response(tx_data):
-    is_backdated = tx_data.get('is_backdated', False)
-    year = tx_data.get('year')
-    month = tx_data.get('month')
-    
-    response = f"✅ Logged: {tx_data['type']} - {tx_data['person']} - {fmt(tx_data['amount'])} - {tx_data['description']}"
-    
-    if is_backdated:
-        month_name = f"{MONTH_NAMES_REVERSE[month]} {year}"
-        response += f"\n📅 {month_name} (backdated)"
-    
-    return response
-
-# Get fund status
 def get_fund_status():
+    """Get fund balances"""
     sheet = get_transaction_sheet()
     if not sheet:
         return None
@@ -524,8 +706,8 @@ def get_fund_status():
     
     return funds
 
-# Get monthly summary
 def get_monthly_summary(month=None):
+    """Get monthly summary"""
     sheet = get_transaction_sheet()
     if not sheet:
         return None
@@ -558,8 +740,8 @@ def get_monthly_summary(month=None):
         'total_expenses': sum(expenses.values())
     }
 
-# Get fixed bills total
 def get_fixed_bills_total():
+    """Get total of all fixed bills"""
     bills = get_fixed_bills_dict()
     seen = set()
     total = 0
@@ -570,7 +752,8 @@ def get_fixed_bills_total():
             total += b['amount']
     return total
 
-# Slack events handler
+# ============== SLACK EVENT HANDLER ==============
+
 @app.route('/slack/events', methods=['POST'])
 def slack_events():
     if not signature_verifier.is_valid_request(request.get_data(), request.headers):
@@ -592,10 +775,11 @@ def slack_events():
         text = event.get('text', '').strip()
         user_id = event.get('user')
         
+        # Get user name
         try:
             user_info = slack_client.users_info(user=user_id)
             user_name = user_info['user']['real_name'].split()[0]
-            if 'naomi' in user_name.lower() or 'nao' in user_name.lower():
+            if 'naomi' in user_name.lower() or 'nao' in user_name.lower() or 'thương' in user_name.lower():
                 user_name = 'Naomi'
             else:
                 user_name = 'Jacob'
@@ -674,7 +858,6 @@ def slack_events():
         
         # Command: list
         elif text_lower.startswith('list') or text_lower.startswith('last'):
-            # Handle 'last 5' as 'list' with limit
             if text_lower.startswith('last'):
                 words = text_lower.split()
                 limit = int(words[1]) if len(words) > 1 and words[1].isdigit() else 5
@@ -685,7 +868,6 @@ def slack_events():
             transactions = get_all_transactions()
             filtered = filter_transactions(transactions, filter_type, filter_category, filter_person, filter_month, limit)
             
-            # Build title
             title_parts = []
             if filter_category:
                 title_parts.append(filter_category.title())
@@ -717,7 +899,6 @@ def slack_events():
             
             target = words[1]
             
-            # Get the transaction to delete
             if target == 'last':
                 transactions = get_all_transactions()
                 if not transactions:
@@ -737,7 +918,7 @@ def slack_events():
             success, result = delete_transaction(tx_to_delete['row_index'], channel)
             
             if success:
-                msg = f"🗑️ Deleted: {tx_to_delete['category']} - {fmt(tx_to_delete['amount'])} - {tx_to_delete['date'][:10]}\n"
+                msg = f"🗑️ Deleted: {tx_to_delete['category']} - {fmt(tx_to_delete['amount'])}\n"
                 msg += "↩️ To undo: `undo`"
                 slack_client.chat_postMessage(channel=channel, text=msg)
             else:
@@ -748,7 +929,7 @@ def slack_events():
             words = text.split()
             
             if len(words) < 3:
-                slack_client.chat_postMessage(channel=channel, text="❓ Usage: `edit 1 150K` (edit item #1 to ₩150K)")
+                slack_client.chat_postMessage(channel=channel, text="❓ Usage: `edit 1 150K`")
                 return jsonify({'ok': True})
             
             target = words[1]
@@ -760,11 +941,15 @@ def slack_events():
             
             idx = int(target) - 1
             if channel not in last_list_results or idx >= len(last_list_results[channel]):
-                slack_client.chat_postMessage(channel=channel, text="❌ Invalid number. Use `list` first, then `edit 1 150K`")
+                slack_client.chat_postMessage(channel=channel, text="❌ Invalid number. Use `list` first")
                 return jsonify({'ok': True})
             
             tx_to_edit = last_list_results[channel][idx]
             new_amount = parse_amount(new_amount_str)
+            
+            if not new_amount:
+                slack_client.chat_postMessage(channel=channel, text="❌ Invalid amount")
+                return jsonify({'ok': True})
             
             success, old_value = edit_transaction(tx_to_edit['row_index'], new_amount)
             
@@ -787,30 +972,31 @@ def slack_events():
         
         # Command: help
         elif text_lower in ['help', 'trợ giúp', '?']:
-            help_msg = """🤖 *Finance Bot v4 Commands:*
+            help_msg = """🤖 *Finance Bot V5*
 
 *➕ Add Transaction:*
-• `jacob 2.8M salary` - Log income
-• `gas 150K` - Log expense (smart comparison)
-• `gas dec 119910` - Log for past month
+• `salary 2m` - Log income
+• `50K cà phê` - Log expense
+• `jacob 2.8M salary` - Specify person
+• `gas dec 150K` - Backdate to month
 
-*📋 List Transactions:*
-• `list` - This month's transactions
-• `list dec` - December transactions
-• `list gas` - All gas bills
+*📋 List:*
+• `list` - This month
+• `list dec` - December
 • `list gas 5` - Last 5 gas bills
-• `list expense` - This month's expenses
 • `last 5` - Last 5 transactions
 
 *✏️ Edit & Delete:*
-• `delete 1` - Delete item #1 from list
-• `delete last` - Delete most recent
-• `edit 1 150K` - Change amount of item #1
-• `undo` - Undo last delete
+• `delete 1` or `delete last`
+• `edit 1 150K`
+• `undo`
 
 *📊 Status:*
-• `status` - Monthly summary + funds
-• `bills` - View fixed bills"""
+• `status` - Summary + funds
+• `bills` - Fixed bills
+
+*💡 Smart Categories:*
+Food, Groceries, Transport, Gift, Family, Date, Entertainment, Shopping, Travel, Healthcare, Business, and more!"""
             slack_client.chat_postMessage(channel=channel, text=help_msg)
         
         # Try to parse as transaction
@@ -819,10 +1005,7 @@ def slack_events():
             if tx:
                 success, msg = log_transaction(tx)
                 if success:
-                    if tx.get('fixed_bill'):
-                        response = build_fixed_bill_response(tx)
-                    else:
-                        response = build_transaction_response(tx)
+                    response = build_response(tx)
                 else:
                     response = f"❌ Error: {msg}"
                 slack_client.chat_postMessage(channel=channel, text=response)
@@ -831,7 +1014,7 @@ def slack_events():
 
 @app.route('/', methods=['GET'])
 def health():
-    return jsonify({'status': 'ok', 'bot': 'Couple Finance Bot v4'})
+    return jsonify({'status': 'ok', 'bot': 'Couple Finance Bot V5'})
 
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 3000))

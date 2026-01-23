@@ -991,7 +991,7 @@ def slack_events():
                 
                 # Add loan reminder if any
                 if has_loans:
-                    msg += "\n\n⚠️ check loan - debt"
+                    msg += "\n\n⚠️ Check Loan - Debt → `list debt`"
                 
                 slack_client.chat_postMessage(channel=channel, text=msg)
             else:
@@ -1033,8 +1033,8 @@ def slack_events():
             msg += f"*Total: {fmt(total)}*"
             slack_client.chat_postMessage(channel=channel, text=msg)
         
-        # Command: list debt / list loan
-        elif text_lower in ['list debt', 'list loan', 'list nợ', 'list mượn']:
+        # Command: list debt / list loan (MUST be before general 'list' check)
+        elif text_lower in ['list debt', 'list loan', 'list nợ', 'list mượn', 'debt', 'loan']:
             loans = get_outstanding_loans()
             if loans:
                 last_debt_list[channel] = loans
@@ -1060,7 +1060,7 @@ def slack_events():
             else:
                 slack_client.chat_postMessage(channel=channel, text=f"❌ {result}")
         
-        # Command: list
+        # Command: list (general)
         elif text_lower.startswith('list') or text_lower.startswith('last'):
             if text_lower.startswith('last'):
                 words = text_lower.split()

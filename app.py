@@ -20,6 +20,16 @@ GOOGLE_SHEET_ID = os.environ.get('GOOGLE_SHEET_ID', '1CRWaO855R-_8GKR2Pwpqw28ZFW
 slack_client = WebClient(token=SLACK_BOT_TOKEN)
 signature_verifier = SignatureVerifier(SLACK_SIGNING_SECRET)
 
+# ============== USER ID MAPPING ==============
+# Direct mapping of Slack User IDs to names - most reliable method
+NAOMI_USER_IDS = ['U0AAFBUSNSD']
+
+def detect_user_name(user_id):
+    """Detect user by Slack User ID"""
+    if user_id in NAOMI_USER_IDS:
+        return 'Naomi'
+    return 'Jacob'
+
 # ============== DUPLICATE EVENT PREVENTION ==============
 processed_events = set()
 MAX_PROCESSED_EVENTS = 100
@@ -40,10 +50,39 @@ def is_duplicate_event(event_id):
     
     return False
 
-# ============== STORAGE FOR UNDO/LIST ==============
-last_deleted = {}
+# ============== UNIVERSAL UNDO SYSTEM ==============
+# Stores last action for each channel for undo
+last_action = {}
+
+def store_undo_action(channel_id, action_type, data):
+    """Store action for potential undo"""
+    last_action[channel_id] = {
+        'type': action_type,  # 'delete', 'add', 'edit', 'paid'
+        'data': data,
+        'timestamp': datetime.now()
+    }
+
+def get_undo_action(channel_id):
+    """Get stored action if within time limit"""
+    if channel_id not in last_action:
+        return None, "Nothing to undo (bot may have restarted)"
+    
+    action = last_action[channel_id]
+    time_diff = (datetime.now() - action['timestamp']).seconds
+    
+    if time_diff > 600:  # 10 minutes
+        return None, "Undo expired (>10 minutes)"
+    
+    return action, None
+
+def clear_undo_action(channel_id):
+    """Clear undo action after use"""
+    if channel_id in last_action:
+        del last_action[channel_id]
+
+# ============== STORAGE FOR LIST RESULTS ==============
 last_list_results = {}
-last_debt_list = {}  # Store debt list for 'paid' command
+last_debt_list = {}
 
 # ============== MASTER CATEGORIES ==============
 CATEGORIES = {
@@ -298,17 +337,16 @@ def detect_category(text):
     return 'Other', {'emoji': ['📝'], 'responses': ["Logged! 📝"]}
 
 def is_income(text, category):
-    """Check if transaction is income - using EXACT word match to avoid 'coffee' containing 'fee'"""
+    """Check if transaction is income - using EXACT word match"""
     text_lower = text.lower()
     
     if category == 'Income':
         return True
     
-    # Split into words for exact matching
     words = re.findall(r'\b\w+\b', text_lower)
     
     for keyword in INCOME_KEYWORDS_EXACT:
-        if keyword in words:  # Exact word match
+        if keyword in words:
             return True
     
     return False
@@ -399,41 +437,6 @@ def get_emoji(category, category_data, is_income_tx):
         return random.choice(['💰', '💵', '🎉'])
     return random.choice(category_data.get('emoji', ['📝']))
 
-# ============== USER DETECTION ==============
-
-def detect_user_name(user_id):
-    """Detect if user is Jacob or Naomi with better name field support"""
-    try:
-        user_info = slack_client.users_info(user=user_id)
-        user = user_info.get('user', {})
-        profile = user.get('profile', {})
-        
-        # Get ALL possible name fields from Slack
-        names_to_check = [
-            user.get('real_name', ''),
-            user.get('name', ''),
-            profile.get('display_name', ''),
-            profile.get('real_name', ''),
-            profile.get('first_name', ''),
-        ]
-        
-        # Combine all names into one string for checking
-        all_names = ' '.join(names_to_check).lower()
-        
-        # Check for Naomi indicators (including Vietnamese names)
-        naomi_indicators = ['naomi', 'nao', 'thương', 'thuong', 'bùi', 'bui', 'thươngbùi', 'thuongbui', 'thuơng']
-        
-        for indicator in naomi_indicators:
-            if indicator in all_names:
-                return 'Naomi'
-        
-        # Default to Jacob
-        return 'Jacob'
-    except Exception as e:
-        # Log error but default to Jacob
-        print(f"Error detecting user: {e}")
-        return 'Jacob'
-
 # ============== DUPLICATE INCOME CHECK ==============
 
 def check_duplicate_income(tx_data):
@@ -476,16 +479,16 @@ def get_outstanding_loans():
     
     for i, row in enumerate(records):
         if row.get('Type') == 'Expense' and row.get('Category') == 'Loan & Debt':
-            description = str(row.get('Description', '')).lower()
-            # Skip if it's a repayment
-            if not is_repayment(description):
+            description = str(row.get('Description', ''))
+            # Skip if it's marked as [PAID] or is a repayment
+            if not description.startswith('[PAID]') and not is_repayment(description.lower()):
                 loans.append({
                     'row_index': i + 2,
                     'date': row.get('Date', ''),
                     'type': 'Expense',
                     'category': 'Loan & Debt',
                     'amount': row.get('Amount', 0),
-                    'description': row.get('Description', ''),
+                    'description': description,
                     'person': row.get('Person', ''),
                     'month': row.get('Month', ''),
                 })
@@ -498,31 +501,68 @@ def has_outstanding_loans():
     return len(loans) > 0
 
 def mark_loan_as_paid(loan_index, channel_id):
-    """Mark a loan as paid by logging repayment income"""
+    """Mark a loan as paid by adding [PAID] prefix and logging income"""
     if channel_id not in last_debt_list or loan_index >= len(last_debt_list[channel_id]):
-        return False, "Invalid loan number. Use `list debt` first."
+        return False, "Invalid loan number. Use `list debt` first.", None
     
     loan = last_debt_list[channel_id][loan_index]
     
-    # Log as income (repayment received)
     sheet = get_transaction_sheet()
     if not sheet:
-        return False, "Cannot connect to Google Sheets"
+        return False, "Cannot connect to Google Sheets", None
     
+    # 1. Update original loan description with [PAID] prefix
+    try:
+        original_desc = loan['description']
+        new_desc = f"[PAID] {original_desc}"
+        sheet.update_cell(loan['row_index'], 5, new_desc)  # Column 5 = Description
+    except Exception as e:
+        return False, f"Error updating loan: {e}", None
+    
+    # 2. Log income entry for repayment
     now = datetime.now()
-    row = [
+    income_row = [
         now.strftime('%Y-%m-%d'),
         'Income',
         'Loan & Debt',
         loan['amount'],
-        f"nhận lại/trả nợ: {loan['description']}",
+        f"nhận lại/trả nợ: {original_desc}",
         loan['person'],
         now.strftime('%Y-%m-01'),
         'slack'
     ]
     
-    sheet.append_row(row)
-    return True, loan
+    sheet.append_row(income_row)
+    
+    # Store for undo
+    return True, loan, {
+        'loan_row_index': loan['row_index'],
+        'original_desc': original_desc,
+        'income_row_data': income_row
+    }
+
+def undo_paid(undo_data):
+    """Undo a paid action - remove [PAID] prefix and delete income entry"""
+    sheet = get_transaction_sheet()
+    if not sheet:
+        return False, "Cannot connect to Google Sheets"
+    
+    try:
+        # 1. Restore original description (remove [PAID] prefix)
+        sheet.update_cell(undo_data['loan_row_index'], 5, undo_data['original_desc'])
+        
+        # 2. Find and delete the income entry
+        records = sheet.get_all_records()
+        for i, row in enumerate(records):
+            if (row.get('Type') == 'Income' and 
+                row.get('Category') == 'Loan & Debt' and
+                f"nhận lại/trả nợ: {undo_data['original_desc']}" in str(row.get('Description', ''))):
+                sheet.delete_rows(i + 2)
+                break
+        
+        return True, "Paid action undone"
+    except Exception as e:
+        return False, str(e)
 
 # ============== TRANSACTION PARSING ==============
 
@@ -553,7 +593,6 @@ def parse_transaction(text, user_name):
         else:
             person = 'Joint'
     else:
-        # Check if it's a loan transaction
         if is_loan_transaction(description):
             category = 'Loan & Debt'
             category_data = CATEGORIES.get('Loan & Debt', {'emoji': ['🤝'], 'responses': ["Loan tracked! 🤝"]})
@@ -562,7 +601,6 @@ def parse_transaction(text, user_name):
     
     tx_is_income = is_income(description, category)
     
-    # If it's a repayment, mark as income
     if is_repayment(description):
         tx_is_income = True
         category = 'Loan & Debt'
@@ -586,7 +624,7 @@ def parse_transaction(text, user_name):
 def log_transaction(tx_data):
     sheet = get_transaction_sheet()
     if not sheet:
-        return False, "Cannot connect to Google Sheets"
+        return False, "Cannot connect to Google Sheets", None
     
     year = tx_data.get('year', datetime.now().year)
     month = tx_data.get('month', datetime.now().month)
@@ -610,7 +648,25 @@ def log_transaction(tx_data):
     ]
     
     sheet.append_row(row)
-    return True, "Transaction logged!"
+    
+    # Get the row index of newly added row
+    all_values = sheet.get_all_values()
+    new_row_index = len(all_values)
+    
+    return True, "Transaction logged!", {'row_index': new_row_index, 'row_data': row}
+
+def delete_row_by_index(row_index):
+    """Delete a row by index"""
+    sheet = get_transaction_sheet()
+    if not sheet:
+        return False, "Cannot connect to Google Sheets"
+    
+    try:
+        row_data = sheet.row_values(row_index)
+        sheet.delete_rows(row_index)
+        return True, row_data
+    except Exception as e:
+        return False, str(e)
 
 def build_response(tx_data, duplicate_warning=None):
     category = tx_data['category']
@@ -649,13 +705,12 @@ def build_response(tx_data, duplicate_warning=None):
             elif ratio < 0.5:
                 response += f"📊 Usually {fmt(default_amount)} - nice savings! 🎉"
     
-    # Add loan tracking hint
     if is_loan:
         response += "\n💡 Track with `list debt`"
     
     if duplicate_warning:
         response += f"\n\n⚠️ *Warning:* You already logged {fmt(amount)} \"{description}\" today!"
-        response += "\nDuplicate? Use `delete last` to remove."
+        response += "\nDuplicate? Use `undo` to remove."
     else:
         personality = get_personality_response(category, category_data, amount, is_income_tx)
         if personality:
@@ -696,7 +751,6 @@ def filter_transactions(transactions, filter_type=None, filter_category=None, fi
         filtered = [t for t in filtered if t['type'].lower() == filter_type.lower()]
     
     if filter_category:
-        # Special handling for 'debt' filter
         if filter_category.lower() in ['debt', 'loan', 'nợ', 'mượn']:
             filtered = [t for t in filtered if t['category'] == 'Loan & Debt']
         else:
@@ -804,8 +858,6 @@ def parse_delete_targets(target_str):
     return sorted(list(set(targets)), reverse=True)
 
 def delete_transactions(targets, channel_id):
-    global last_deleted
-    
     sheet = get_transaction_sheet()
     if not sheet:
         return False, "Cannot connect to Google Sheets", []
@@ -846,52 +898,47 @@ def delete_transactions(targets, channel_id):
                 if item['row_index'] > tx['row_index']:
                     item['row_index'] -= 1
         
-        last_deleted[channel_id] = {
-            'items': deleted_rows_data,
-            'timestamp': datetime.now()
-        }
-        
-        return True, "Deleted successfully", deleted_items
+        return True, "Deleted successfully", deleted_items, deleted_rows_data
     
     except Exception as e:
-        return False, str(e), []
+        return False, str(e), [], []
 
-def undo_delete(channel_id):
-    global last_deleted
-    
-    if channel_id not in last_deleted:
-        return False, "Nothing to undo (bot may have restarted)", []
-    
-    deleted_info = last_deleted[channel_id]
-    time_diff = (datetime.now() - deleted_info['timestamp']).seconds
-    if time_diff > 600:  # Extended to 10 minutes
-        return False, "Undo expired (>10 minutes)", []
-    
-    sheet = get_transaction_sheet()
-    if not sheet:
-        return False, "Cannot connect to Google Sheets", []
-    
-    try:
-        restored = []
-        for item in deleted_info['items']:
-            sheet.append_row(item['row_data'])
-            restored.append(item['tx'])
-        
-        del last_deleted[channel_id]
-        return True, "Restored successfully", restored
-    
-    except Exception as e:
-        return False, str(e), []
-
-def edit_transaction(row_index, new_amount):
+def undo_delete(deleted_rows_data):
+    """Undo delete by restoring rows"""
     sheet = get_transaction_sheet()
     if not sheet:
         return False, "Cannot connect to Google Sheets"
     
     try:
+        restored = []
+        for item in deleted_rows_data:
+            sheet.append_row(item['row_data'])
+            restored.append(item['tx'])
+        return True, restored
+    except Exception as e:
+        return False, str(e)
+
+def edit_transaction(row_index, new_amount):
+    sheet = get_transaction_sheet()
+    if not sheet:
+        return False, "Cannot connect to Google Sheets", None
+    
+    try:
         old_value = sheet.cell(row_index, 4).value
         sheet.update_cell(row_index, 4, new_amount)
-        return True, old_value
+        return True, old_value, {'row_index': row_index, 'old_amount': int(float(old_value)), 'new_amount': new_amount}
+    except Exception as e:
+        return False, str(e), None
+
+def undo_edit(edit_data):
+    """Undo edit by restoring old amount"""
+    sheet = get_transaction_sheet()
+    if not sheet:
+        return False, "Cannot connect to Google Sheets"
+    
+    try:
+        sheet.update_cell(edit_data['row_index'], 4, edit_data['old_amount'])
+        return True, f"Restored amount to {fmt(edit_data['old_amount'])}"
     except Exception as e:
         return False, str(e)
 
@@ -948,6 +995,50 @@ def get_monthly_summary(month=None):
         'total_expenses': sum(expenses.values())
     }
 
+# ============== UNIVERSAL UNDO HANDLER ==============
+
+def perform_undo(channel_id):
+    """Perform undo based on last action type"""
+    action, error = get_undo_action(channel_id)
+    
+    if not action:
+        return False, error
+    
+    action_type = action['type']
+    data = action['data']
+    
+    if action_type == 'delete':
+        success, result = undo_delete(data)
+        if success:
+            clear_undo_action(channel_id)
+            if len(result) == 1:
+                return True, f"↩️ Restored: {result[0]['category']} - {fmt(result[0]['amount'])}"
+            return True, f"↩️ Restored {len(result)} items"
+        return False, result
+    
+    elif action_type == 'add':
+        success, result = delete_row_by_index(data['row_index'])
+        if success:
+            clear_undo_action(channel_id)
+            return True, f"↩️ Removed last transaction"
+        return False, result
+    
+    elif action_type == 'edit':
+        success, result = undo_edit(data)
+        if success:
+            clear_undo_action(channel_id)
+            return True, result
+        return False, result
+    
+    elif action_type == 'paid':
+        success, result = undo_paid(data)
+        if success:
+            clear_undo_action(channel_id)
+            return True, f"↩️ Loan restored to unpaid"
+        return False, result
+    
+    return False, "Unknown action type"
+
 # ============== SLACK EVENT HANDLER ==============
 
 @app.route('/slack/events', methods=['POST'])
@@ -975,7 +1066,6 @@ def slack_events():
         text = event.get('text', '').strip()
         user_id = event.get('user')
         
-        # Better user detection
         user_name = detect_user_name(user_id)
         
         text_lower = text.lower()
@@ -1007,7 +1097,6 @@ def slack_events():
                         progress = (emergency / 15000000) * 100
                         msg += f"\n🎯 Emergency Fund: {progress:.1f}% → ₩15M"
                 
-                # Add loan reminder if any
                 if has_loans:
                     msg += "\n\n⚠️ Check Loan - Debt → `list debt`"
                 
@@ -1069,9 +1158,12 @@ def slack_events():
                 return jsonify({'ok': True})
             
             loan_index = int(parts[1]) - 1
-            success, result = mark_loan_as_paid(loan_index, channel)
+            success, result, undo_data = mark_loan_as_paid(loan_index, channel)
             
             if success:
+                # Store for undo
+                store_undo_action(channel, 'paid', undo_data)
+                
                 msg = f"✅ Paid: {fmt(result['amount'])} - {result['description']}\n"
                 msg += f"💰 Logged as income: nhận lại/trả nợ"
                 slack_client.chat_postMessage(channel=channel, text=msg)
@@ -1125,9 +1217,12 @@ def slack_events():
                 slack_client.chat_postMessage(channel=channel, text="❓ Invalid format. Use: `delete 1` or `delete 1,2,3` or `delete 1-5`")
                 return jsonify({'ok': True})
             
-            success, message, deleted_items = delete_transactions(targets, channel)
+            success, message, deleted_items, deleted_rows_data = delete_transactions(targets, channel)
             
             if success:
+                # Store for undo
+                store_undo_action(channel, 'delete', deleted_rows_data)
+                
                 if len(deleted_items) == 1:
                     msg = f"🗑️ Deleted: {deleted_items[0]['category']} - {fmt(deleted_items[0]['amount'])}\n"
                 else:
@@ -1168,27 +1263,22 @@ def slack_events():
                 slack_client.chat_postMessage(channel=channel, text="❌ Invalid amount")
                 return jsonify({'ok': True})
             
-            success, old_value = edit_transaction(tx_to_edit['row_index'], new_amount)
+            success, old_value, edit_data = edit_transaction(tx_to_edit['row_index'], new_amount)
             
             if success:
+                # Store for undo
+                store_undo_action(channel, 'edit', edit_data)
+                
                 msg = f"✏️ Updated: {tx_to_edit['category']}\n"
                 msg += f"   {fmt(int(float(old_value)))} → {fmt(new_amount)}"
                 slack_client.chat_postMessage(channel=channel, text=msg)
             else:
                 slack_client.chat_postMessage(channel=channel, text=f"❌ Error: {old_value}")
         
-        # Command: undo
+        # Command: undo (universal)
         elif text_lower == 'undo':
-            success, message, restored = undo_delete(channel)
-            
-            if success:
-                if len(restored) == 1:
-                    msg = f"↩️ Restored: {restored[0]['category']} - {fmt(restored[0]['amount'])}"
-                else:
-                    msg = f"↩️ Restored {len(restored)} items"
-                slack_client.chat_postMessage(channel=channel, text=msg)
-            else:
-                slack_client.chat_postMessage(channel=channel, text=f"❌ {message}")
+            success, message = perform_undo(channel)
+            slack_client.chat_postMessage(channel=channel, text=message if success else f"❌ {message}")
         
         # Command: help
         elif text_lower in ['help', 'trợ giúp', '?']:
@@ -1216,9 +1306,11 @@ def slack_events():
 • `list debt` - See all loans
 • `paid 1` - Mark loan #1 as repaid
 
-*✏️ Edit & Undo:*
+*✏️ Edit:*
 • `edit 1 150K` - Change amount
-• `undo` - Restore deleted
+
+*↩️ Undo (works for any last action):*
+• `undo` - Undo last add/delete/edit/paid
 
 *📊 Status:*
 • `status` - Summary + funds
@@ -1231,8 +1323,11 @@ def slack_events():
             if tx:
                 duplicate = check_duplicate_income(tx)
                 
-                success, msg = log_transaction(tx)
+                success, msg, add_data = log_transaction(tx)
                 if success:
+                    # Store for undo
+                    store_undo_action(channel, 'add', add_data)
+                    
                     response = build_response(tx, duplicate_warning=duplicate)
                 else:
                     response = f"❌ Error: {msg}"
@@ -1242,7 +1337,7 @@ def slack_events():
 
 @app.route('/', methods=['GET'])
 def health():
-    return jsonify({'status': 'ok', 'bot': 'Couple Finance Bot V5.2'})
+    return jsonify({'status': 'ok', 'bot': 'Couple Finance Bot V5.2 Final'})
 
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 3000))

@@ -111,14 +111,20 @@ CATEGORIES = {
     },
     'Gift': {
         'keywords': ['gift', 'present', 'wedding gift', 'birthday', 'baby shower',
-                     'quà', 'tặng', 'quà cưới', 'mừng cưới', 'quà sinh nhật', 'sinh nhật', 
+                     'quà', 'tặng', 'quà cưới', 'mừng cưới', 'quà sinh nhật', 'sinh nhật',
                      'đám cưới', '돌잔치', 'thôi nôi', 'quà tân gia', 'tặng bạn', 'mừng'],
         'emoji': ['🎁', '💝', '🎀'],
         'responses': ["So thoughtful! 💕", "Người nhận sẽ vui lắm!", "Nice gift! 🎁", "Generous! 💝"]
     },
+    'Tithe & Offering': {
+        'keywords': ['tithe', 'offering', 'dâng hiến', 'dâng 1/10', 'tiền dâng', 'hiến tế',
+                     'nhà thờ', 'church', 'đóng góp nhà thờ'],
+        'emoji': ['⛪', '🙏', '✝️'],
+        'responses': ["God bless! ⛪", "Dâng hiến cho Chúa! 🙏", "Blessed giving! ✝️"]
+    },
     'Family Support': {
         'keywords': ['mom', 'dad', 'parents', 'family', 'send home',
-                     'cho mẹ', 'cho ba', 'biếu', 'hỗ trợ gia đình', 'gửi về', 'gửi tiền', 
+                     'cho mẹ', 'cho ba', 'biếu', 'hỗ trợ gia đình', 'gửi về', 'gửi tiền',
                      'tiền nhà', 'bố mẹ', 'gia đình', 'cho bố', 'mẹ', 'ba', 'bố'],
         'emoji': ['👨‍👩‍👧', '❤️', '🏠'],
         'responses': ["Family first! ❤️", "Hiếu thảo quá! 👏", "Family love! 👨‍👩‍👧"]
@@ -166,7 +172,8 @@ CATEGORIES = {
     'Business': {
         'keywords': ['ads', 'contractor', 'client', 'marketing', 'revenue', 'business',
                      'quảng cáo', 'cộng tác viên', 'khách hàng', 'doanh thu', 'công việc',
-                     'ad spend', 'facebook ads', 'campaign'],
+                     'ad spend', 'facebook ads', 'campaign', 'tiền quảng cáo', 'chi phí quảng cáo',
+                     'phí quảng cáo', 'gởi chị dương', 'tiền chị dương', 'chị dương'],
         'emoji': ['💼', '📈', '💹'],
         'responses': ["Business expense logged! 💼", "Invest to grow! 📈", "Business moves! 💹"]
     },

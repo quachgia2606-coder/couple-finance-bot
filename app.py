@@ -1112,7 +1112,7 @@ def slack_events():
                 slack_client.chat_postMessage(channel=channel, text="❌ Cannot fetch status")
         
         # Command: bills
-        elif text_lower in ['bills', 'fixed', 'fixed bills']:
+        elif text_lower in ['bills', 'fixed', 'fixed bills', 'fixbill', 'fix bill']:
             bills = get_fixed_bills_dict()
             msg = "📋 *Fixed Bills (Active):*\n\n"
             

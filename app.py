@@ -2,7 +2,6 @@ import os
 import re
 import json
 import random
-import unicodedata
 from datetime import datetime
 from flask import Flask, request, jsonify
 from slack_sdk import WebClient
@@ -112,20 +111,14 @@ CATEGORIES = {
     },
     'Gift': {
         'keywords': ['gift', 'present', 'wedding gift', 'birthday', 'baby shower',
-                     'quà', 'tặng', 'quà cưới', 'mừng cưới', 'quà sinh nhật', 'sinh nhật',
+                     'quà', 'tặng', 'quà cưới', 'mừng cưới', 'quà sinh nhật', 'sinh nhật', 
                      'đám cưới', '돌잔치', 'thôi nôi', 'quà tân gia', 'tặng bạn', 'mừng'],
         'emoji': ['🎁', '💝', '🎀'],
         'responses': ["So thoughtful! 💕", "Người nhận sẽ vui lắm!", "Nice gift! 🎁", "Generous! 💝"]
     },
-    'Tithe & Offering': {
-        'keywords': ['tithe', 'offering', 'dâng hiến', 'dâng 1/10', 'tiền dâng', 'hiến tế',
-                     'nhà thờ', 'church', 'đóng góp nhà thờ'],
-        'emoji': ['⛪', '🙏', '✝️'],
-        'responses': ["God bless! ⛪", "Dâng hiến cho Chúa! 🙏", "Blessed giving! ✝️"]
-    },
     'Family Support': {
         'keywords': ['mom', 'dad', 'parents', 'family', 'send home',
-                     'cho mẹ', 'cho ba', 'biếu', 'hỗ trợ gia đình', 'gửi về', 'gửi tiền',
+                     'cho mẹ', 'cho ba', 'biếu', 'hỗ trợ gia đình', 'gửi về', 'gửi tiền', 
                      'tiền nhà', 'bố mẹ', 'gia đình', 'cho bố', 'mẹ', 'ba', 'bố'],
         'emoji': ['👨‍👩‍👧', '❤️', '🏠'],
         'responses': ["Family first! ❤️", "Hiếu thảo quá! 👏", "Family love! 👨‍👩‍👧"]
@@ -173,8 +166,7 @@ CATEGORIES = {
     'Business': {
         'keywords': ['ads', 'contractor', 'client', 'marketing', 'revenue', 'business',
                      'quảng cáo', 'cộng tác viên', 'khách hàng', 'doanh thu', 'công việc',
-                     'ad spend', 'facebook ads', 'campaign', 'tiền quảng cáo', 'chi phí quảng cáo',
-                     'phí quảng cáo', 'gởi chị dương', 'tiền chị dương', 'chị dương'],
+                     'ad spend', 'facebook ads', 'campaign'],
         'emoji': ['💼', '📈', '💹'],
         'responses': ["Business expense logged! 💼", "Invest to grow! 📈", "Business moves! 💹"]
     },
@@ -206,26 +198,6 @@ CATEGORIES = {
                      'lương', 'hoa hồng', 'thưởng', 'thu nhập', 'tiền lương'],
         'emoji': ['💰', '🎉', '💵'],
         'responses': ["Money in! 💰", "Cha-ching! 🎉", "Nice! Keep it coming! 💪", "Pay day! 💵"]
-    },
-    'Emergency Fund': {
-        'keywords': ['emergency fund', 'quỹ khẩn cấp', 'quy khan cap'],
-        'emoji': ['🎯', '💰', '🚨'],
-        'responses': ["Building your safety net! 🎯", "Emergency fund growing! 💪", "Smart saving! 🚨"]
-    },
-    'Investment Fund': {
-        'keywords': ['investment fund', 'quỹ đầu tư', 'quy dau tu'],
-        'emoji': ['📈', '💹', '💰'],
-        'responses': ["Investing in your future! 📈", "Growing your wealth! 💹", "Smart investing! 💰"]
-    },
-    'Planning Fund': {
-        'keywords': ['planning fund', 'quỹ kế hoạch', 'quy ke hoach'],
-        'emoji': ['🏠', '📋', '🎯'],
-        'responses': ["Planning ahead! 🏠", "Future goals! 📋", "Building your plans! 🎯"]
-    },
-    'Date Fund': {
-        'keywords': ['date fund', 'quỹ hẹn hò', 'quy hen ho'],
-        'emoji': ['💕', '💑', '🥰'],
-        'responses': ["Date fund growing! 💕", "Love & memories! 💑", "Quality time fund! 🥰"]
     },
 }
 
@@ -570,32 +542,25 @@ def mark_loan_as_paid(loan_index, channel_id):
     }
 
 def undo_paid(undo_data):
-    """Undo a paid action - remove [PAID] prefix and delete income entry
-    Supports both single undo_data (dict) and multiple (list of dicts)"""
+    """Undo a paid action - remove [PAID] prefix and delete income entry"""
     sheet = get_transaction_sheet()
     if not sheet:
         return False, "Cannot connect to Google Sheets"
-
+    
     try:
-        # Handle both single and multiple payments
-        undo_list = undo_data if isinstance(undo_data, list) else [undo_data]
-
-        for data in undo_list:
-            # 1. Restore original description (remove [PAID] prefix)
-            sheet.update_cell(data['loan_row_index'], 5, data['original_desc'])
-
-            # 2. Find and delete the income entry
-            records = sheet.get_all_records()
-            for i, row in enumerate(records):
-                if (row.get('Type') == 'Income' and
-                    row.get('Category') == 'Loan & Debt' and
-                    f"nhận lại/trả nợ: {data['original_desc']}" in str(row.get('Description', ''))):
-                    sheet.delete_rows(i + 2)
-                    break
-
-        count = len(undo_list)
-        msg = f"Paid action undone" if count == 1 else f"{count} paid actions undone"
-        return True, msg
+        # 1. Restore original description (remove [PAID] prefix)
+        sheet.update_cell(undo_data['loan_row_index'], 5, undo_data['original_desc'])
+        
+        # 2. Find and delete the income entry
+        records = sheet.get_all_records()
+        for i, row in enumerate(records):
+            if (row.get('Type') == 'Income' and 
+                row.get('Category') == 'Loan & Debt' and
+                f"nhận lại/trả nợ: {undo_data['original_desc']}" in str(row.get('Description', ''))):
+                sheet.delete_rows(i + 2)
+                break
+        
+        return True, "Paid action undone"
     except Exception as e:
         return False, str(e)
 
@@ -608,20 +573,7 @@ def parse_transaction(text, user_name):
     person, text = extract_person_from_text(text)
     if not person:
         person = user_name
-
-    # Check for joint expense keywords
-    is_joint = False
-    joint_keywords = ['joint', 'quỹ chung', 'chung']
-    text_lower = text.lower()
-    for keyword in joint_keywords:
-        if keyword in text_lower:
-            is_joint = True
-            person = 'Joint'
-            # Remove joint keyword from text
-            text = text.replace(keyword, '').replace(keyword.capitalize(), '').replace(keyword.upper(), '')
-            text = ' '.join(text.split())  # Clean up extra spaces
-            break
-
+    
     amount, description = extract_amount_from_text(text)
     
     if not amount:
@@ -664,8 +616,7 @@ def parse_transaction(text, user_name):
         'year': year,
         'month': month,
         'is_backdated': is_backdated,
-        'is_loan': is_loan_transaction(description),
-        'is_joint': is_joint
+        'is_loan': is_loan_transaction(description)
     }
 
 # ============== TRANSACTION LOGGING ==============
@@ -728,16 +679,12 @@ def build_response(tx_data, duplicate_warning=None):
     month = tx_data.get('month')
     fixed_bill = tx_data.get('fixed_bill')
     is_loan = tx_data.get('is_loan', False)
-    is_joint = tx_data.get('is_joint', False)
-
+    
     emoji = get_emoji(category, category_data, is_income_tx)
-
+    
     response = f"{emoji} Logged: {category} - {fmt(amount)}\n"
     response += f"📝 {description}\n"
-
-    if is_joint:
-        response += f"👥 Joint Expense\n"
-
+    
     if is_backdated:
         month_name = f"{MONTH_NAMES_REVERSE[month]} {year}"
         response += f"📅 {month_name} (backdated)\n"
@@ -783,7 +730,7 @@ def get_all_transactions():
     
     for i, row in enumerate(records):
         tx_type = row.get('Type', '')
-        if tx_type in ['Income', 'Expense']:
+        if tx_type in ['Income', 'Expense', 'Fund Add']:
             transactions.append({
                 'row_index': i + 2,
                 'date': row.get('Date', ''),
@@ -871,7 +818,7 @@ def format_transaction_list(transactions, title, channel_id, is_debt_list=False)
         except:
             date_display = date_str
         
-        emoji = "💵" if tx['type'] == 'Income' else "💸"
+        emoji = "💵" if tx['type'] == 'Income' else "🎯" if tx['type'] == 'Fund Add' else "💸"
         amount = tx['amount'] or 0
         description = tx['description'][:30] + "..." if len(tx['description']) > 30 else tx['description']
         
@@ -1001,31 +948,18 @@ def get_fund_status():
     sheet = get_transaction_sheet()
     if not sheet:
         return None
-
+    
     records = sheet.get_all_records()
     funds = {}
-
+    
     for row in records:
-        row_type = row.get('Type', '')
-        fund_name = row.get('Category', '')
-        amount = row.get('Amount', 0) or 0
-
-        if row_type == 'Fund Balance':
-            # Direct balance setting - overwrite
+        if row.get('Type') == 'Fund Balance':
+            fund_name = row.get('Category', '')
             funds[fund_name] = {
-                'amount': amount,
+                'amount': row.get('Amount', 0),
                 'date': row.get('Date', '')
             }
-        elif row_type == 'Fund Add':
-            # Addition to fund - accumulate
-            if fund_name in funds:
-                funds[fund_name]['amount'] += amount
-            else:
-                funds[fund_name] = {
-                    'amount': amount,
-                    'date': row.get('Date', '')
-                }
-
+    
     return funds
 
 def get_monthly_summary(month=None):
@@ -1102,7 +1036,23 @@ def perform_undo(channel_id):
             clear_undo_action(channel_id)
             return True, f"↩️ Loan restored to unpaid"
         return False, result
-    
+
+    elif action_type == 'fund_update':
+        sheet = get_transaction_sheet()
+        if sheet:
+            try:
+                if data.get('was_new'):
+                    # Delete the newly created row
+                    sheet.delete_rows(data['row_index'])
+                else:
+                    # Restore old amount
+                    sheet.update_cell(data['row_index'], 4, data['old_amount'])
+                clear_undo_action(channel_id)
+                return True, f"↩️ {data['fund_name']} restored to {fmt(data['old_amount'])}"
+            except Exception as e:
+                return False, str(e)
+        return False, "Cannot connect to sheet"
+
     return False, "Unknown action type"
 
 # ============== SLACK EVENT HANDLER ==============
@@ -1130,12 +1080,10 @@ def slack_events():
     if event_type == 'message':
         channel = event.get('channel')
         text = event.get('text', '').strip()
-        # Normalize Unicode to NFC form (composed) for Vietnamese characters
-        text = unicodedata.normalize('NFC', text)
         user_id = event.get('user')
-
+        
         user_name = detect_user_name(user_id)
-
+        
         text_lower = text.lower()
         
         # Command: status
@@ -1173,7 +1121,7 @@ def slack_events():
                 slack_client.chat_postMessage(channel=channel, text="❌ Cannot fetch status")
         
         # Command: bills
-        elif text_lower in ['bills', 'fixed', 'fixed bills', 'fixbill', 'fix bill']:
+        elif text_lower in ['bills', 'fixed', 'fixed bills']:
             bills = get_fixed_bills_dict()
             msg = "📋 *Fixed Bills (Active):*\n\n"
             
@@ -1207,21 +1155,7 @@ def slack_events():
             
             msg += f"*Total: {fmt(total)}*"
             slack_client.chat_postMessage(channel=channel, text=msg)
-
-        # Command: list joint
-        elif text_lower in ['list joint', 'list chung', 'list quỹ chung']:
-            transactions = get_all_transactions()
-            joint_tx = [t for t in transactions if t['person'] == 'Joint' and t['type'] == 'Expense']
-            joint_tx = sorted(joint_tx, key=lambda x: x['date'], reverse=True)[:20]
-            if joint_tx:
-                msg = format_transaction_list(joint_tx, "Joint Expenses", channel)
-                # Add total at the end
-                total = sum(t['amount'] for t in joint_tx)
-                msg += f"\n\n💰 Total: {fmt(total)}"
-            else:
-                msg = "📋 No joint expenses found!"
-            slack_client.chat_postMessage(channel=channel, text=msg)
-
+        
         # Command: list debt / list loan (MUST be before general 'list' check)
         elif text_lower in ['list debt', 'list loan', 'list nợ', 'list mượn', 'debt', 'loan']:
             loans = get_outstanding_loans()
@@ -1234,49 +1168,23 @@ def slack_events():
         
         # Command: paid (mark loan as paid)
         elif text_lower.startswith('paid'):
-            target_str = text_lower.replace('paid', '').strip()
-
-            if not target_str:
-                slack_client.chat_postMessage(channel=channel, text="❓ Usage: `paid 1` or `paid 1,2,3`")
+            parts = text_lower.split()
+            if len(parts) < 2 or not parts[1].isdigit():
+                slack_client.chat_postMessage(channel=channel, text="❓ Usage: `paid 1` (mark loan #1 as paid)")
                 return jsonify({'ok': True})
-
-            # Parse targets (support single or comma-separated)
-            targets = parse_delete_targets(target_str)
-
-            if not targets:
-                slack_client.chat_postMessage(channel=channel, text="❓ Usage: `paid 1` or `paid 1,2,3`")
-                return jsonify({'ok': True})
-
-            # Process each loan payment
-            paid_items = []
-            undo_data_list = []
-
-            for target in sorted(targets):
-                loan_index = target - 1
-                success, result, undo_data = mark_loan_as_paid(loan_index, channel)
-
-                if success:
-                    paid_items.append(result)
-                    undo_data_list.append(undo_data)
-                else:
-                    slack_client.chat_postMessage(channel=channel, text=f"❌ {result}")
-                    return jsonify({'ok': True})
-
-            if paid_items:
-                # Store for undo (all payments)
-                store_undo_action(channel, 'paid', undo_data_list)
-
-                if len(paid_items) == 1:
-                    msg = f"✅ Paid: {fmt(paid_items[0]['amount'])} - {paid_items[0]['description']}\n"
-                    msg += f"💰 Logged as income: nhận lại/trả nợ"
-                else:
-                    msg = f"✅ Paid {len(paid_items)} loans:\n"
-                    for item in paid_items:
-                        msg += f"  • {fmt(item['amount'])} - {item['description']}\n"
-                    total = sum(item['amount'] for item in paid_items)
-                    msg += f"\n💰 Total logged as income: {fmt(total)}"
-
+            
+            loan_index = int(parts[1]) - 1
+            success, result, undo_data = mark_loan_as_paid(loan_index, channel)
+            
+            if success:
+                # Store for undo
+                store_undo_action(channel, 'paid', undo_data)
+                
+                msg = f"✅ Paid: {fmt(result['amount'])} - {result['description']}\n"
+                msg += f"💰 Logged as income: nhận lại/trả nợ"
                 slack_client.chat_postMessage(channel=channel, text=msg)
+            else:
+                slack_client.chat_postMessage(channel=channel, text=f"❌ {result}")
         
         # Command: list (general)
         elif text_lower.startswith('list') or text_lower.startswith('last'):
@@ -1403,8 +1311,6 @@ def slack_events():
 • `list` - This month
 • `list expense` - Expenses only
 • `list dec` - December
-• `list joint` - Joint expenses
-• `list emergency fund` - Emergency Fund additions
 • `list debt` - Outstanding loans
 • `last 5` - Last 5 transactions
 
@@ -1414,7 +1320,7 @@ def slack_events():
 
 *💰 Loans:*
 • `list debt` - See all loans
-• `paid 1` or `paid 1,2,3` - Mark loans as repaid
+• `paid 1` - Mark loan #1 as repaid
 
 *✏️ Edit:*
 • `edit 1 150K` - Change amount
@@ -1424,86 +1330,102 @@ def slack_events():
 
 *📊 Status:*
 • `status` - Summary + funds
-• `bills` - Fixed bills
-
-*💰 Quick Fund Add:*
-• `quỹ khẩn cấp 1M` or `quy khan cap 1M` - Emergency Fund
-• `quỹ đầu tư 500K` or `quy dau tu 500K` - Investment Fund
-• `emergency fund 1M` - Emergency Fund (English)"""
+• `bills` - Fixed bills"""
             slack_client.chat_postMessage(channel=channel, text=help_msg)
-
-        # Command: Quick fund add (Vietnamese/English)
-        elif any(text_lower.startswith(unicodedata.normalize('NFC', prefix)) for prefix in [
-            'quỹ khẩn cấp', 'quỹ đầu tư', 'quỹ kế hoạch', 'quỹ hẹn hò',
-            'quy khan cap', 'quy dau tu', 'quy ke hoach', 'quy hen ho',
-            'emergency fund', 'investment fund', 'planning fund', 'date fund',
-            'thêm quỹ', 'them quy'
-        ]):
-            fund_mapping = {
-                'quỹ khẩn cấp': ('Emergency Fund', '🎯'),
-                'quy khan cap': ('Emergency Fund', '🎯'),
-                'emergency fund': ('Emergency Fund', '🎯'),
-                'quỹ đầu tư': ('Investment Fund', '📈'),
-                'quy dau tu': ('Investment Fund', '📈'),
-                'investment fund': ('Investment Fund', '📈'),
-                'quỹ kế hoạch': ('Planning Fund', '🏠'),
-                'quy ke hoach': ('Planning Fund', '🏠'),
-                'planning fund': ('Planning Fund', '🏠'),
-                'quỹ hẹn hò': ('Date Fund', '💕'),
-                'quy hen ho': ('Date Fund', '💕'),
-                'date fund': ('Date Fund', '💕'),
+        
+        # Command: Update fund balance (set total directly)
+        elif text_lower.startswith('update fund') or text_lower.startswith('cập nhật quỹ') or text_lower.startswith('cap nhat quy'):
+            fund_keywords = {
+                'emergency': ('Emergency Fund', '🎯'),
+                'khẩn cấp': ('Emergency Fund', '🎯'),
+                'khan cap': ('Emergency Fund', '🎯'),
+                'investment': ('Investment Fund', '📈'),
+                'đầu tư': ('Investment Fund', '📈'),
+                'dau tu': ('Investment Fund', '📈'),
+                'planning': ('Planning Fund', '🏠'),
+                'kế hoạch': ('Planning Fund', '🏠'),
+                'ke hoach': ('Planning Fund', '🏠'),
+                'date': ('Date Fund', '💕'),
+                'hẹn hò': ('Date Fund', '💕'),
+                'hen ho': ('Date Fund', '💕'),
             }
 
-            # Find which fund
+            # Find which fund mentioned
             fund_name = None
             fund_emoji = '💰'
-            for prefix, (name, emoji) in fund_mapping.items():
-                if text_lower.startswith(unicodedata.normalize('NFC', prefix)):
+            for keyword, (name, emoji) in fund_keywords.items():
+                if keyword in text_lower:
                     fund_name = name
                     fund_emoji = emoji
                     break
 
-            # Extract amount
+            if not fund_name:
+                slack_client.chat_postMessage(channel=channel, text="❓ Cách dùng:\n• `update fund emergency 8.7M`\n• `cập nhật quỹ khẩn cấp 8.7M`\n\nFunds: emergency, investment, planning, date")
+                return jsonify({'ok': True})
+
+            # Extract amount (this is the NEW TOTAL)
             amount, _ = extract_amount_from_text(text)
 
             if not amount:
-                slack_client.chat_postMessage(channel=channel, text="❓ Cách dùng:\n• `quỹ khẩn cấp 2M` = Thêm ₩2M vào quỹ\n• `emergency fund 500K` = Add ₩500K to fund")
+                slack_client.chat_postMessage(channel=channel, text=f"❓ Thiếu số tiền. Ví dụ: `update fund emergency 8.7M`")
                 return jsonify({'ok': True})
 
-            # Log to sheet as 'Fund Add'
+            # Get old balance
+            funds = get_fund_status()
+            old_balance = funds.get(fund_name, {}).get('amount', 0)
+
+            # Update or create Fund Balance row in sheet
             sheet = get_transaction_sheet()
             if sheet:
                 now = datetime.now()
-                row = [
-                    now.strftime('%Y-%m-%d'),
-                    'Fund Add',
-                    fund_name,
-                    amount,
-                    f'Thêm vào {fund_name}',
-                    user_name,
-                    now.strftime('%Y-%m-01'),
-                    'slack'
-                ]
-                sheet.append_row(row)
+
+                # Find existing Fund Balance row for this fund
+                records = sheet.get_all_records()
+                found_row = None
+                for i, row in enumerate(records):
+                    if row.get('Type') == 'Fund Balance' and row.get('Category') == fund_name:
+                        found_row = i + 2  # +2 for header and 0-index
+                        break
+
+                if found_row:
+                    # Update existing row
+                    sheet.update_cell(found_row, 1, now.strftime('%Y-%m-%d'))  # Date
+                    sheet.update_cell(found_row, 4, amount)  # Amount
+                    old_data = {'row_index': found_row, 'old_amount': old_balance, 'fund_name': fund_name}
+                else:
+                    # Create new Fund Balance row
+                    row_data = [
+                        now.strftime('%Y-%m-%d'),
+                        'Fund Balance',
+                        fund_name,
+                        amount,
+                        f'{fund_name} Balance',
+                        'Joint',
+                        now.strftime('%Y-%m-01'),
+                        'slack'
+                    ]
+                    sheet.append_row(row_data)
+                    all_values = sheet.get_all_values()
+                    old_data = {'row_index': len(all_values), 'old_amount': old_balance, 'fund_name': fund_name, 'was_new': True}
 
                 # Store for undo
-                all_values = sheet.get_all_values()
-                new_row_index = len(all_values)
-                store_undo_action(channel, 'add', {'row_index': new_row_index, 'row_data': row})
+                store_undo_action(channel, 'fund_update', old_data)
 
-                # Get current fund balance (sum of all Fund Add + Fund Balance for this fund)
-                funds = get_fund_status()
-                old_balance = funds.get(fund_name, {}).get('amount', 0)
-                new_balance = old_balance + amount
+                # Calculate change
+                change = amount - old_balance
+                if change >= 0:
+                    change_str = f"+{fmt(change)}"
+                else:
+                    change_str = f"{fmt(change)}"
 
                 # Progress for Emergency Fund
                 progress_msg = ""
                 if fund_name == 'Emergency Fund':
-                    progress = (new_balance / 15000000) * 100
+                    progress = (amount / 15000000) * 100
                     progress_msg = f"\n🎯 Tiến độ: {progress:.1f}% → ₩15M"
 
-                msg = f"{fund_emoji} {fund_name} +{fmt(amount)}\n"
-                msg += f"Số dư: {fmt(old_balance)} → {fmt(new_balance)}{progress_msg}"
+                msg = f"{fund_emoji} {fund_name} Updated!\n"
+                msg += f"Số dư: {fmt(old_balance)} → {fmt(amount)} ({change_str}){progress_msg}"
                 slack_client.chat_postMessage(channel=channel, text=msg)
             else:
                 slack_client.chat_postMessage(channel=channel, text="❌ Không thể kết nối sheet")

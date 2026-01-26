@@ -730,7 +730,7 @@ def get_all_transactions():
     
     for i, row in enumerate(records):
         tx_type = row.get('Type', '')
-        if tx_type in ['Income', 'Expense', 'Fund Add']:
+        if tx_type in ['Income', 'Expense', 'Fund Add', 'Fund Balance']:
             transactions.append({
                 'row_index': i + 2,
                 'date': row.get('Date', ''),
@@ -818,7 +818,7 @@ def format_transaction_list(transactions, title, channel_id, is_debt_list=False)
         except:
             date_display = date_str
         
-        emoji = "💵" if tx['type'] == 'Income' else "🎯" if tx['type'] == 'Fund Add' else "💸"
+        emoji = "💵" if tx['type'] == 'Income' else "🎯" if tx['type'] in ['Fund Add', 'Fund Balance'] else "💸"
         amount = tx['amount'] or 0
         description = tx['description'][:30] + "..." if len(tx['description']) > 30 else tx['description']
         
@@ -1538,42 +1538,25 @@ def slack_events():
             funds = get_fund_status()
             old_balance = funds.get(fund_name, {}).get('amount', 0)
 
-            # Update or create Fund Balance row in sheet
+            # Always create NEW Fund Balance row (so it shows in list)
             sheet = get_transaction_sheet()
             if sheet:
                 now = datetime.now()
 
-                # Find existing Fund Balance row for this fund (most recent by date)
-                records = sheet.get_all_records()
-                found_row = None
-                found_date = ''
-                for i, row in enumerate(records):
-                    if row.get('Type') == 'Fund Balance' and row.get('Category') == fund_name:
-                        row_date = str(row.get('Date', ''))
-                        if row_date > found_date:
-                            found_row = i + 2  # +2 for header and 0-index
-                            found_date = row_date
-
-                if found_row:
-                    # Update existing row
-                    sheet.update_cell(found_row, 1, now.strftime('%Y-%m-%d'))  # Date
-                    sheet.update_cell(found_row, 4, amount)  # Amount
-                    old_data = {'row_index': found_row, 'old_amount': old_balance, 'fund_name': fund_name}
-                else:
-                    # Create new Fund Balance row
-                    row_data = [
-                        now.strftime('%Y-%m-%d'),
-                        'Fund Balance',
-                        fund_name,
-                        amount,
-                        f'{fund_name} Balance',
-                        'Joint',
-                        now.strftime('%Y-%m-01'),
-                        'slack'
-                    ]
-                    sheet.append_row(row_data)
-                    all_values = sheet.get_all_values()
-                    old_data = {'row_index': len(all_values), 'old_amount': old_balance, 'fund_name': fund_name, 'was_new': True}
+                # Create new Fund Balance row
+                row_data = [
+                    now.strftime('%Y-%m-%d'),
+                    'Fund Balance',
+                    fund_name,
+                    amount,
+                    f'Update {fund_name}: {fmt(old_balance)} → {fmt(amount)}',
+                    'Joint',
+                    now.strftime('%Y-%m-01'),
+                    'slack'
+                ]
+                sheet.append_row(row_data)
+                all_values = sheet.get_all_values()
+                old_data = {'row_index': len(all_values), 'old_amount': old_balance, 'fund_name': fund_name, 'was_new': True}
 
                 # Store for undo
                 store_undo_action(channel, 'fund_update', old_data)

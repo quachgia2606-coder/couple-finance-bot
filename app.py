@@ -1155,7 +1155,167 @@ def slack_events():
             
             msg += f"*Total: {fmt(total)}*"
             slack_client.chat_postMessage(channel=channel, text=msg)
-        
+
+        # Command: Fund calculator
+        elif text_lower in ['fund', 'quỹ', 'quy', 'tính quỹ', 'tinh quy']:
+            sheet = get_transaction_sheet()
+            if not sheet:
+                slack_client.chat_postMessage(channel=channel, text="❌ Không thể kết nối sheet")
+                return jsonify({'ok': True})
+
+            now = datetime.now()
+            current_month = now.strftime('%Y-%m-01')
+
+            records = sheet.get_all_records()
+
+            # Calculate income by person
+            income_jacob = 0
+            income_naomi = 0
+            income_other = 0
+            has_jacob_salary = False
+            has_naomi_salary = False
+            has_naomi_commission = False
+
+            # Calculate business costs
+            business_costs = 0
+            has_ads_naomi = False
+            has_jacob_fee = False
+            has_chi_duong = False
+
+            # Calculate joint expenses
+            joint_expenses = 0
+
+            for row in records:
+                row_month = str(row.get('Month', ''))[:10]
+                if row_month != current_month:
+                    continue
+
+                tx_type = row.get('Type', '')
+                category = row.get('Category', '')
+                person = row.get('Person', '')
+                amount = row.get('Amount', 0) or 0
+                description = str(row.get('Description', '')).lower()
+
+                # Income tracking
+                if tx_type == 'Income':
+                    if person == 'Jacob':
+                        income_jacob += amount
+                        if 'salary' in description or 'lương' in description:
+                            has_jacob_salary = True
+                    elif person == 'Naomi':
+                        income_naomi += amount
+                        if 'salary' in description or 'lương' in description:
+                            has_naomi_salary = True
+                        if 'commission' in description or 'hoa hồng' in description:
+                            has_naomi_commission = True
+                    else:
+                        income_other += amount
+
+                # Business costs tracking
+                if tx_type == 'Expense' and category == 'Business':
+                    business_costs += amount
+                    if 'ads' in description or 'quảng cáo' in description:
+                        has_ads_naomi = True
+                    if 'jacob' in description or 'gởi jacob' in description or 'fee' in description:
+                        has_jacob_fee = True
+                    if 'dương' in description or 'duong' in description:
+                        has_chi_duong = True
+
+                # Joint expenses tracking
+                if tx_type == 'Expense' and person == 'Joint':
+                    joint_expenses += amount
+
+            total_income = income_jacob + income_naomi + income_other
+
+            # Fixed expenses (set amount - user can update with command later)
+            fixed_expenses = 3300000  # ₩3.3M default
+
+            # Net pool calculation
+            net_pool = total_income - fixed_expenses - business_costs - joint_expenses
+
+            # Fund allocation (40/30/20/10)
+            alloc_emergency = int(net_pool * 0.40)
+            alloc_investment = int(net_pool * 0.30)
+            alloc_planning = int(net_pool * 0.20)
+            alloc_date = int(net_pool * 0.10)
+
+            # Build response
+            month_name = now.strftime('%B %Y')
+            msg = f"📊 *Fund Calculator - {month_name}*\n\n"
+
+            # Income section
+            msg += "💵 *INCOME:*\n"
+            if has_jacob_salary:
+                msg += f"✅ Jacob Salary: {fmt(income_jacob)}\n"
+            else:
+                msg += f"❓ Jacob Salary: _chưa nhập_ → `jacob salary 2.8M`\n"
+
+            if has_naomi_salary:
+                msg += f"✅ Naomi Salary: "
+            else:
+                msg += f"❓ Naomi Salary: _chưa nhập_ → `naomi salary 2M`\n"
+
+            if has_naomi_commission:
+                msg += f"✅ Naomi Commission: ✓\n"
+            else:
+                msg += f"❓ Naomi Commission: _chưa nhập_ → `naomi commission 5M`\n"
+
+            if income_other > 0:
+                msg += f"✅ Other: {fmt(income_other)}\n"
+
+            msg += f"📝 *Total Income: {fmt(total_income)}*\n\n"
+
+            # Fixed expenses
+            msg += f"💸 *FIXED EXPENSES:* {fmt(fixed_expenses)}\n\n"
+
+            # Business costs section
+            msg += "💼 *BUSINESS COSTS:*\n"
+            if has_ads_naomi:
+                msg += f"✅ Ads Naomi: ✓\n"
+            else:
+                msg += f"❓ Ads Naomi? → `50K ads naomi`\n"
+
+            if has_jacob_fee:
+                msg += f"✅ Jacob Fee: ✓\n"
+            else:
+                msg += f"❓ Jacob Fee? → `800K gởi jacob`\n"
+
+            if has_chi_duong:
+                msg += f"✅ Chị Dương: ✓\n"
+            else:
+                msg += f"❓ Chị Dương? → `500K chị dương`\n"
+
+            msg += f"📝 *Total Business: {fmt(business_costs)}*\n\n"
+
+            # Joint expenses
+            if joint_expenses > 0:
+                msg += f"🛒 *JOINT EXPENSES:* {fmt(joint_expenses)}\n\n"
+
+            # Net pool
+            msg += "───────────────\n"
+            msg += f"💰 *NET POOL: {fmt(net_pool)}*\n\n"
+
+            # Suggested allocation
+            msg += "*Suggested Allocation (40/30/20/10):*\n"
+            msg += f"• 🎯 Emergency: {fmt(alloc_emergency)}\n"
+            msg += f"• 📈 Investment: {fmt(alloc_investment)}\n"
+            msg += f"• 🏠 Planning: {fmt(alloc_planning)}\n"
+            msg += f"• 💕 Date: {fmt(alloc_date)}\n\n"
+
+            # Actions
+            msg += "✅ Apply suggested? → `fund apply`\n"
+            msg += f"✏️ Custom amounts? → `fund apply {fmt(alloc_emergency)} {fmt(alloc_investment)} {fmt(alloc_planning)} {fmt(alloc_date)}`"
+
+            # Store allocation for fund apply command
+            store_undo_action(channel, 'fund_calc', {
+                'emergency': alloc_emergency,
+                'investment': alloc_investment,
+                'planning': alloc_planning,
+                'date': alloc_date
+            })
+
+            slack_client.chat_postMessage(channel=channel, text=msg)
+
         # Command: list debt / list loan (MUST be before general 'list' check)
         elif text_lower in ['list debt', 'list loan', 'list nợ', 'list mượn', 'debt', 'loan']:
             loans = get_outstanding_loans()

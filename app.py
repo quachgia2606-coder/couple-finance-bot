@@ -948,18 +948,22 @@ def get_fund_status():
     sheet = get_transaction_sheet()
     if not sheet:
         return None
-    
+
     records = sheet.get_all_records()
     funds = {}
-    
+
     for row in records:
         if row.get('Type') == 'Fund Balance':
             fund_name = row.get('Category', '')
-            funds[fund_name] = {
-                'amount': row.get('Amount', 0),
-                'date': row.get('Date', '')
-            }
-    
+            row_date = str(row.get('Date', ''))
+
+            # Only update if this is newer or first occurrence
+            if fund_name not in funds or row_date > funds[fund_name]['date']:
+                funds[fund_name] = {
+                    'amount': row.get('Amount', 0),
+                    'date': row_date
+                }
+
     return funds
 
 def get_monthly_summary(month=None):
@@ -1539,13 +1543,16 @@ def slack_events():
             if sheet:
                 now = datetime.now()
 
-                # Find existing Fund Balance row for this fund
+                # Find existing Fund Balance row for this fund (most recent by date)
                 records = sheet.get_all_records()
                 found_row = None
+                found_date = ''
                 for i, row in enumerate(records):
                     if row.get('Type') == 'Fund Balance' and row.get('Category') == fund_name:
-                        found_row = i + 2  # +2 for header and 0-index
-                        break
+                        row_date = str(row.get('Date', ''))
+                        if row_date > found_date:
+                            found_row = i + 2  # +2 for header and 0-index
+                            found_date = row_date
 
                 if found_row:
                     # Update existing row

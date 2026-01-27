@@ -1068,6 +1068,20 @@ def perform_undo(channel_id):
                 return False, str(e)
         return False, "Cannot connect to sheet"
 
+    elif action_type == 'fund_apply':
+        sheet = get_transaction_sheet()
+        if sheet:
+            try:
+                # Delete all added rows (in reverse order to maintain indices)
+                rows_to_delete = sorted(data['rows'], key=lambda x: x['row_index'], reverse=True)
+                for row_info in rows_to_delete:
+                    sheet.delete_rows(row_info['row_index'])
+                clear_undo_action(channel_id)
+                return True, f"↩️ Fund allocation undone ({len(rows_to_delete)} entries removed)"
+            except Exception as e:
+                return False, str(e)
+        return False, "Cannot connect to sheet"
+
     return False, "Unknown action type"
 
 # ============== SLACK EVENT HANDLER ==============
@@ -1328,6 +1342,122 @@ def slack_events():
                 'planning': alloc_planning,
                 'date': alloc_date
             })
+
+            slack_client.chat_postMessage(channel=channel, text=msg)
+
+        # Command: Fund apply
+        elif text_lower.startswith('fund apply') or text_lower.startswith('áp dụng quỹ') or text_lower.startswith('ap dung quy'):
+            sheet = get_transaction_sheet()
+            if not sheet:
+                slack_client.chat_postMessage(channel=channel, text="❌ Không thể kết nối sheet")
+                return jsonify({'ok': True})
+
+            now = datetime.now()
+
+            # Check if custom amounts provided: "fund apply 2.5M 1.8M 1M 500K"
+            # Remove the command prefix
+            amounts_text = text_lower.replace('fund apply', '').replace('áp dụng quỹ', '').replace('ap dung quy', '').strip()
+
+            custom_amounts = []
+            if amounts_text:
+                # Parse custom amounts
+                parts = amounts_text.replace(',', ' ').split()
+                for part in parts:
+                    amt = parse_amount(part)
+                    if amt:
+                        custom_amounts.append(amt)
+
+            if len(custom_amounts) == 4:
+                # Use custom amounts
+                alloc_emergency = custom_amounts[0]
+                alloc_investment = custom_amounts[1]
+                alloc_planning = custom_amounts[2]
+                alloc_date = custom_amounts[3]
+                is_custom = True
+            else:
+                # Get suggested amounts from last fund calculation
+                action, error = get_undo_action(channel)
+                if not action or action.get('type') != 'fund_calc':
+                    slack_client.chat_postMessage(channel=channel, text="❓ Chạy `fund` trước để tính toán, hoặc nhập số tiền:\n`fund apply 2.5M 1.8M 1M 500K`\n(Emergency, Investment, Planning, Date)")
+                    return jsonify({'ok': True})
+
+                calc_data = action['data']
+                alloc_emergency = calc_data['emergency']
+                alloc_investment = calc_data['investment']
+                alloc_planning = calc_data['planning']
+                alloc_date = calc_data['date']
+                is_custom = False
+
+            # Validate - don't apply negative amounts
+            if alloc_emergency < 0 or alloc_investment < 0 or alloc_planning < 0 or alloc_date < 0:
+                slack_client.chat_postMessage(channel=channel, text="❌ Không thể áp dụng số âm. Kiểm tra lại income và expenses.")
+                return jsonify({'ok': True})
+
+            # Log each fund allocation as "Fund Add"
+            fund_allocations = [
+                ('Emergency Fund', '🎯', alloc_emergency),
+                ('Investment Fund', '📈', alloc_investment),
+                ('Planning Fund', '🏠', alloc_planning),
+                ('Date Fund', '💕', alloc_date),
+            ]
+
+            added_rows = []
+            for fund_name, emoji, amount in fund_allocations:
+                if amount > 0:
+                    row_data = [
+                        now.strftime('%Y-%m-%d'),
+                        'Fund Add',
+                        fund_name,
+                        amount,
+                        f'Monthly allocation - {now.strftime("%b %Y")}',
+                        'Joint',
+                        now.strftime('%Y-%m-01'),
+                        'slack'
+                    ]
+                    sheet.append_row(row_data)
+
+                    # Track for undo
+                    all_values = sheet.get_all_values()
+                    added_rows.append({
+                        'row_index': len(all_values),
+                        'fund_name': fund_name,
+                        'amount': amount
+                    })
+
+            # Store for undo
+            store_undo_action(channel, 'fund_apply', {'rows': added_rows})
+
+            # Get updated fund balances
+            funds = get_fund_status()
+
+            # Build response
+            msg = "✅ *Fund Allocation Applied!*\n\n"
+
+            if is_custom:
+                msg += "📝 Custom amounts:\n"
+            else:
+                msg += "📝 Suggested amounts (40/30/20/10):\n"
+
+            total_allocated = 0
+            for fund_name, emoji, amount in fund_allocations:
+                if amount > 0:
+                    new_balance = funds.get(fund_name, {}).get('amount', 0)
+                    msg += f"{emoji} {fund_name}: +{fmt(amount)} → {fmt(new_balance)}\n"
+                    total_allocated += amount
+
+            msg += f"\n💰 Total allocated: {fmt(total_allocated)}\n"
+
+            # Emergency fund progress
+            emergency_balance = funds.get('Emergency Fund', {}).get('amount', 0)
+            progress = (emergency_balance / 15000000) * 100
+            msg += f"\n🎯 Emergency Fund: {progress:.1f}% → ₩15M"
+
+            if progress >= 100:
+                msg += "\n🎊 CONGRATULATIONS! Freedom achieved! 🎊"
+            elif progress >= 75:
+                msg += "\n🔥 Almost there! Keep going!"
+            elif progress >= 50:
+                msg += "\n💪 Halfway to freedom!"
 
             slack_client.chat_postMessage(channel=channel, text=msg)
 

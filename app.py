@@ -166,7 +166,9 @@ CATEGORIES = {
     'Business': {
         'keywords': ['ads', 'contractor', 'client', 'marketing', 'revenue', 'business',
                      'quảng cáo', 'cộng tác viên', 'khách hàng', 'doanh thu', 'công việc',
-                     'ad spend', 'facebook ads', 'campaign'],
+                     'ad spend', 'facebook ads', 'campaign',
+                     'chị dương', 'chi duong', 'dương', 'duong',
+                     'gởi jacob', 'goi jacob', 'tiền jacob', 'tien jacob', 'jacob fee'],
         'emoji': ['💼', '📈', '💹'],
         'responses': ["Business expense logged! 💼", "Invest to grow! 📈", "Business moves! 💹"]
     },
@@ -568,11 +570,20 @@ def undo_paid(undo_data):
 
 def parse_transaction(text, user_name):
     original_text = text.strip()
-    
+
     text, year, month, is_backdated = extract_month_from_text(original_text)
-    person, text = extract_person_from_text(text)
-    if not person:
-        person = user_name
+
+    # Check if this is a business payment mentioning a person (don't extract as person)
+    business_person_keywords = ['gởi jacob', 'goi jacob', 'tiền jacob', 'tien jacob', 'jacob fee', 'fee jacob',
+                                 'chị dương', 'chi duong', 'tiền dương', 'tien duong']
+    is_business_payment = any(kw in text.lower() for kw in business_person_keywords)
+
+    if is_business_payment:
+        person = user_name  # Keep original user, don't extract from text
+    else:
+        person, text = extract_person_from_text(text)
+        if not person:
+            person = user_name
     
     amount, description = extract_amount_from_text(text)
     
@@ -1176,9 +1187,9 @@ def slack_events():
             income_jacob = 0
             income_naomi = 0
             income_other = 0
-            has_jacob_salary = False
-            has_naomi_salary = False
-            has_naomi_commission = False
+            jacob_salary_amount = 0
+            naomi_salary_amount = 0
+            naomi_commission_amount = 0
 
             # Calculate business costs
             business_costs = 0
@@ -1205,13 +1216,13 @@ def slack_events():
                     if person == 'Jacob':
                         income_jacob += amount
                         if 'salary' in description or 'lương' in description:
-                            has_jacob_salary = True
+                            jacob_salary_amount += amount
                     elif person == 'Naomi':
                         income_naomi += amount
                         if 'salary' in description or 'lương' in description:
-                            has_naomi_salary = True
+                            naomi_salary_amount += amount
                         if 'commission' in description or 'hoa hồng' in description:
-                            has_naomi_commission = True
+                            naomi_commission_amount += amount
                     else:
                         income_other += amount
 
@@ -1249,18 +1260,18 @@ def slack_events():
 
             # Income section
             msg += "💵 *INCOME:*\n"
-            if has_jacob_salary:
-                msg += f"✅ Jacob Salary: {fmt(income_jacob)}\n"
+            if jacob_salary_amount > 0:
+                msg += f"✅ Jacob Salary: {fmt(jacob_salary_amount)}\n"
             else:
                 msg += f"❓ Jacob Salary: _chưa nhập_ → `jacob salary 2.8M`\n"
 
-            if has_naomi_salary:
-                msg += f"✅ Naomi Salary: "
+            if naomi_salary_amount > 0:
+                msg += f"✅ Naomi Salary: {fmt(naomi_salary_amount)}\n"
             else:
                 msg += f"❓ Naomi Salary: _chưa nhập_ → `naomi salary 2M`\n"
 
-            if has_naomi_commission:
-                msg += f"✅ Naomi Commission: ✓\n"
+            if naomi_commission_amount > 0:
+                msg += f"✅ Naomi Commission: {fmt(naomi_commission_amount)}\n"
             else:
                 msg += f"❓ Naomi Commission: _chưa nhập_ → `naomi commission 5M`\n"
 

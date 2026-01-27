@@ -1193,9 +1193,9 @@ def slack_events():
 
             # Calculate business costs
             business_costs = 0
-            has_ads_naomi = False
-            has_jacob_fee = False
-            has_chi_duong = False
+            ads_naomi_amount = 0
+            jacob_fee_amount = 0
+            chi_duong_amount = 0
 
             # Calculate joint expenses
             joint_expenses = 0
@@ -1230,11 +1230,11 @@ def slack_events():
                 if tx_type == 'Expense' and category == 'Business':
                     business_costs += amount
                     if 'ads' in description or 'quảng cáo' in description:
-                        has_ads_naomi = True
+                        ads_naomi_amount += amount
                     if 'jacob' in description or 'gởi jacob' in description or 'fee' in description:
-                        has_jacob_fee = True
+                        jacob_fee_amount += amount
                     if 'dương' in description or 'duong' in description:
-                        has_chi_duong = True
+                        chi_duong_amount += amount
 
                 # Joint expenses tracking
                 if tx_type == 'Expense' and person == 'Joint':
@@ -1285,18 +1285,18 @@ def slack_events():
 
             # Business costs section
             msg += "💼 *BUSINESS COSTS:*\n"
-            if has_ads_naomi:
-                msg += f"✅ Ads Naomi: ✓\n"
+            if ads_naomi_amount > 0:
+                msg += f"✅ Ads Naomi: {fmt(ads_naomi_amount)}\n"
             else:
                 msg += f"❓ Ads Naomi? → `50K ads naomi`\n"
 
-            if has_jacob_fee:
-                msg += f"✅ Jacob Fee: ✓\n"
+            if jacob_fee_amount > 0:
+                msg += f"✅ Jacob Fee: {fmt(jacob_fee_amount)}\n"
             else:
                 msg += f"❓ Jacob Fee? → `800K gởi jacob`\n"
 
-            if has_chi_duong:
-                msg += f"✅ Chị Dương: ✓\n"
+            if chi_duong_amount > 0:
+                msg += f"✅ Chị Dương: {fmt(chi_duong_amount)}\n"
             else:
                 msg += f"❓ Chị Dương? → `500K chị dương`\n"
 

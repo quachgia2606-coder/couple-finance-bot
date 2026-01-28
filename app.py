@@ -245,6 +245,46 @@ WISDOM_POOL = {
     ],
 }
 
+EMERGENCY_FUND_MILESTONES = [5000000, 7500000, 10000000, 12500000, 15000000]  # ₩5M, ₩7.5M, ₩10M, ₩12.5M, ₩15M
+
+CELEBRATION_MESSAGES = {
+    'income': [
+        "💰 Ngày lương! Tuyệt vời!",
+        "💵 Tiền vào! Keep it coming! 💪",
+        "🎉 Cha-ching! Làm tốt lắm!",
+    ],
+    'big_income': [
+        "🎊 WOW! Thu nhập khủng! 🚀",
+        "💰💰💰 Jackpot! Quá đỉnh!",
+        "🔥 Big money! Cứ thế phát huy!",
+    ],
+    'milestone_5m': [
+        "🎯 MILESTONE! Emergency Fund đạt ₩5M!",
+        "33% đường đến tự do tài chính! 💪",
+    ],
+    'milestone_7.5m': [
+        "🎯 MILESTONE! Emergency Fund đạt ₩7.5M!",
+        "Halfway there! 50% rồi! 🔥",
+    ],
+    'milestone_10m': [
+        "🎊 MILESTONE LỚN! Emergency Fund đạt ₩10M!",
+        "67% đường đến ₩15M! Quá xuất sắc! 🏆",
+    ],
+    'milestone_12.5m': [
+        "🚀 SẮP ĐẾN ĐÍCH! Emergency Fund đạt ₩12.5M!",
+        "Chỉ còn ₩2.5M nữa thôi! 🎯",
+    ],
+    'milestone_15m': [
+        "🎊🎉🏆 FREEDOM ACHIEVED! ₩15M! 🏆🎉🎊",
+        "Bạn đã đạt được TỰ DO TÀI CHÍNH!",
+        "\"Có công mài sắt, có ngày nên kim\" - Hôm nay là ngày đó! 🌟",
+    ],
+    'under_budget': [
+        "👏 Tháng này tiết kiệm hơn tháng trước!",
+        "📉 Chi tiêu giảm! Làm tốt lắm!",
+    ],
+}
+
 SETTINGS_DEFAULTS = {
     'tone': 'vietnamese_mix',
     'wisdom_frequency': 50,
@@ -565,6 +605,27 @@ def get_wisdom(context='saving'):
     quotes = WISDOM_POOL.get(context, WISDOM_POOL['saving'])
     return random.choice(quotes)
 
+def check_milestone(fund_name, old_balance, new_balance):
+    """Check if a milestone was crossed"""
+    if fund_name != 'Emergency Fund':
+        return None
+
+    for milestone in EMERGENCY_FUND_MILESTONES:
+        if old_balance < milestone <= new_balance:
+            # Crossed a milestone!
+            if milestone == 5000000:
+                return random.choice(CELEBRATION_MESSAGES['milestone_5m'])
+            elif milestone == 7500000:
+                return random.choice(CELEBRATION_MESSAGES['milestone_7.5m'])
+            elif milestone == 10000000:
+                return random.choice(CELEBRATION_MESSAGES['milestone_10m'])
+            elif milestone == 12500000:
+                return random.choice(CELEBRATION_MESSAGES['milestone_12.5m'])
+            elif milestone == 15000000:
+                return random.choice(CELEBRATION_MESSAGES['milestone_15m'])
+
+    return None
+
 # ============== DUPLICATE INCOME CHECK ==============
 
 def check_duplicate_income(tx_data):
@@ -876,9 +937,14 @@ def build_response(tx_data, duplicate_warning=None):
 
     # Income celebration with wisdom
     if tx_data['type'] == 'Income':
+        if amount >= 5000000:  # ₩5M+ is big income
+            response += f"\n\n{random.choice(CELEBRATION_MESSAGES['big_income'])}"
+        elif amount >= 1000000:  # ₩1M+ gets celebration
+            response += f"\n\n{random.choice(CELEBRATION_MESSAGES['income'])}"
+
         wisdom = get_wisdom('income')
         if wisdom:
-            response += f"\n\n{wisdom}"
+            response += f"\n{wisdom}"
 
     return response
 
@@ -1554,6 +1620,10 @@ def slack_events():
                 ('Date Fund', '💕', alloc_date),
             ]
 
+            # Get old Emergency Fund balance for milestone check
+            old_funds = get_fund_status()
+            old_emergency_balance = old_funds.get('Emergency Fund', {}).get('amount', 0)
+
             added_rows = []
             for fund_name, emoji, amount in fund_allocations:
                 if amount > 0:
@@ -1605,7 +1675,14 @@ def slack_events():
             progress = (emergency_balance / 15000000) * 100
             msg += f"\n🎯 Emergency Fund: {progress:.1f}% → ₩15M"
 
-            if progress >= 100:
+            # Check for milestone
+            milestone_msg = check_milestone('Emergency Fund', old_emergency_balance, emergency_balance)
+            if milestone_msg:
+                msg += f"\n\n{milestone_msg}"
+                wisdom = get_wisdom('milestone')
+                if wisdom:
+                    msg += f"\n{wisdom}"
+            elif progress >= 100:
                 msg += "\n🎊 CONGRATULATIONS! Freedom achieved! 🎊"
             elif progress >= 75:
                 msg += "\n🔥 Almost there! Keep going!"
@@ -1870,6 +1947,15 @@ def slack_events():
 
                 msg = f"{fund_emoji} {fund_name} Updated!\n"
                 msg += f"Số dư: {fmt(old_balance)} → {fmt(amount)} ({change_str}){progress_msg}"
+
+                # Check for milestone
+                milestone_msg = check_milestone(fund_name, old_balance, amount)
+                if milestone_msg:
+                    msg += f"\n\n{milestone_msg}"
+                    wisdom = get_wisdom('milestone')
+                    if wisdom:
+                        msg += f"\n{wisdom}"
+
                 slack_client.chat_postMessage(channel=channel, text=msg)
             else:
                 slack_client.chat_postMessage(channel=channel, text="❌ Không thể kết nối sheet")

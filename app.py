@@ -341,7 +341,16 @@ def get_fixed_bills_sheet():
     return get_sheet('Fixed Bills')
 
 def parse_amount(amount_str):
-    amount_str = str(amount_str).replace(',', '').replace('₩', '').replace(' ', '').strip()
+    amount_str = str(amount_str).replace('₩', '').replace(' ', '').strip()
+
+    # Handle Vietnamese decimal notation (15,5k = 15.5k, 1,5m = 1.5m)
+    # If format is like "15,5k" or "1,5m", convert comma to dot
+    if re.match(r'^\d+,\d+[mkMK]$', amount_str):
+        amount_str = amount_str.replace(',', '.')
+    else:
+        # Remove commas used as thousand separators (1,000,000)
+        amount_str = amount_str.replace(',', '')
+
     match = re.match(r'^([\d.]+)([mkMK]?)$', amount_str)
     if match:
         num = float(match.group(1))

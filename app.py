@@ -1839,7 +1839,121 @@ def slack_events():
         elif text_lower == 'undo':
             success, message = perform_undo(channel)
             slack_client.chat_postMessage(channel=channel, text=message if success else f"❌ {message}")
-        
+
+        # Command: Settings
+        elif text_lower in ['settings', 'cài đặt', 'cai dat']:
+            spending = get_monthly_spending_by_category()
+            now = datetime.now()
+            month_name = now.strftime('%B %Y')
+
+            msg = f"⚙️ *CÀI ĐẶT - {month_name}*\n\n"
+
+            msg += "💰 *NGÂN SÁCH THÁNG:*\n"
+            for category, budget in DEFAULT_BUDGETS.items():
+                spent = spending.get(category, 0)
+                percentage = (spent / budget * 100) if budget > 0 else 0
+
+                if percentage >= 100:
+                    status = "🚨"
+                elif percentage >= 80:
+                    status = "⚠️"
+                else:
+                    status = "✅"
+
+                msg += f"{status} {category}: {fmt(spent)} / {fmt(budget)} ({percentage:.0f}%)\n"
+
+            msg += f"\n🎭 *PERSONALITY:*\n"
+            msg += f"• Tone: Vietnamese Mix 🇻🇳\n"
+            msg += f"• Wisdom: 50% (balanced)\n"
+            msg += f"• Celebrations: On 🎉\n"
+            msg += f"• Warnings: On ⚠️\n"
+
+            msg += f"\n✏️ Change budget: `set budget dining 300K`"
+
+            slack_client.chat_postMessage(channel=channel, text=msg)
+
+        # Command: Budgets quick view
+        elif text_lower in ['budgets', 'ngân sách', 'ngan sach', 'budget']:
+            spending = get_monthly_spending_by_category()
+
+            msg = "💰 *NGÂN SÁCH THÁNG NÀY:*\n\n"
+
+            total_budget = 0
+            total_spent = 0
+
+            for category, budget in DEFAULT_BUDGETS.items():
+                spent = spending.get(category, 0)
+                percentage = (spent / budget * 100) if budget > 0 else 0
+
+                total_budget += budget
+                total_spent += spent
+
+                if percentage >= 100:
+                    bar = "🔴"
+                elif percentage >= 80:
+                    bar = "🟡"
+                else:
+                    bar = "🟢"
+
+                msg += f"{bar} {category}: {fmt(spent)} / {fmt(budget)}\n"
+
+            msg += f"\n───────────────\n"
+            msg += f"📊 Tổng: {fmt(total_spent)} / {fmt(total_budget)}\n"
+
+            remaining_total = total_budget - total_spent
+            if remaining_total > 0:
+                msg += f"✅ Còn lại: {fmt(remaining_total)}"
+            else:
+                msg += f"🚨 Vượt: {fmt(abs(remaining_total))}"
+
+            slack_client.chat_postMessage(channel=channel, text=msg)
+
+        # Command: Set budget
+        elif text_lower.startswith('set budget') or text_lower.startswith('đặt ngân sách'):
+            # Parse: "set budget dining 300K" or "set budget Food & Dining 300000"
+            parts = text.split()
+
+            if len(parts) < 4:
+                slack_client.chat_postMessage(channel=channel, text="❓ Cách dùng: `set budget dining 300K`\n\nCategories: dining, groceries, entertainment, shopping, transport, business, healthcare, gift")
+                return jsonify({'ok': True})
+
+            # Map short names to full category names
+            category_map = {
+                'dining': 'Food & Dining',
+                'food': 'Food & Dining',
+                'groceries': 'Groceries',
+                'grocery': 'Groceries',
+                'entertainment': 'Entertainment',
+                'shopping': 'Shopping',
+                'transport': 'Transport',
+                'business': 'Business',
+                'healthcare': 'Healthcare',
+                'health': 'Healthcare',
+                'gift': 'Gift',
+            }
+
+            category_input = parts[2].lower()
+            category = category_map.get(category_input)
+
+            if not category:
+                slack_client.chat_postMessage(channel=channel, text=f"❓ Không tìm thấy category '{category_input}'\n\nCategories: dining, groceries, entertainment, shopping, transport, business, healthcare, gift")
+                return jsonify({'ok': True})
+
+            amount = parse_amount(parts[3])
+            if not amount:
+                slack_client.chat_postMessage(channel=channel, text=f"❓ Số tiền không hợp lệ: '{parts[3]}'\n\nVí dụ: `set budget dining 300K`")
+                return jsonify({'ok': True})
+
+            # Update budget (in memory)
+            old_budget = DEFAULT_BUDGETS.get(category, 0)
+            DEFAULT_BUDGETS[category] = amount
+
+            msg = f"✅ Đã cập nhật ngân sách!\n\n"
+            msg += f"📝 {category}: {fmt(old_budget)} → {fmt(amount)}\n"
+            msg += f"\n💡 Xem tất cả: `budgets`"
+
+            slack_client.chat_postMessage(channel=channel, text=msg)
+
         # Command: help
         elif text_lower in ['help', 'trợ giúp', '?']:
             help_msg = """🤖 *Finance Bot V5.2*
@@ -1874,7 +1988,12 @@ def slack_events():
 
 *📊 Status:*
 • `status` - Summary + funds
-• `bills` - Fixed bills"""
+• `bills` - Fixed bills
+
+*⚙️ Settings:*
+• `settings` - Xem cài đặt
+• `budgets` - Xem ngân sách
+• `set budget dining 300K` - Đổi ngân sách"""
             slack_client.chat_postMessage(channel=channel, text=help_msg)
         
         # Command: Update fund balance (set total directly)

@@ -87,117 +87,250 @@ last_debt_list = {}
 # ============== MASTER CATEGORIES ==============
 CATEGORIES = {
     'Food & Dining': {
-        'keywords': ['eat', 'dinner', 'lunch', 'breakfast', 'restaurant', 'coffee', 'cafe', 'meal', 'food',
-                     'ăn', 'cơm', 'phở', 'bún', 'bánh mì', 'cà phê', 'cafe', 'nhà hàng', 'ăn trưa', 'ăn tối', 
-                     'ăn sáng', 'quán', 'gọi đồ ăn', 'delivery', 'đặt đồ ăn', 'ăn vặt', 'trà sữa', 'kem', 
-                     'lẩu', 'nướng', 'bbq', 'thịt nướng', 'samgyupsal', 'chimaek', 'chicken', 'gà rán',
-                     'bún bò', 'bún chả', 'bánh cuốn', 'chè', 'snack', 'đồ ăn'],
+        'keywords': [
+            # English
+            'eat', 'dinner', 'lunch', 'breakfast', 'brunch', 'restaurant', 'coffee', 'cafe', 'meal', 'food',
+            'takeout', 'takeaway', 'dine', 'dining', 'drinks', 'beverage', 'beer', 'wine', 'juice', 'smoothie',
+            'dessert', 'cake', 'pizza', 'burger', 'sushi', 'noodles', 'soup', 'snack', 'chicken', 'bbq',
+            # Vietnamese
+            'ăn', 'cơm', 'phở', 'bún', 'bánh mì', 'cà phê', 'cafe', 'nhà hàng', 'ăn trưa', 'ăn tối',
+            'ăn sáng', 'quán', 'gọi đồ ăn', 'delivery', 'đặt đồ ăn', 'ăn vặt', 'trà sữa', 'kem',
+            'lẩu', 'nướng', 'thịt nướng', 'samgyupsal', 'chimaek', 'gà rán', 'gà', 'thịt', 'cá',
+            'bún bò', 'bún chả', 'bánh cuốn', 'chè', 'đồ ăn', 'mì', 'hủ tiếu', 'cháo', 'xôi',
+            'bánh bao', 'bánh', 'hải sản', 'tôm', 'cua', 'sushi', 'kimbap', 'đồ uống', 'nước ngọt',
+            'bia', 'rượu', 'cocktail', 'nhậu', 'ăn nhậu', 'buffet', 'tiệc', 'nước ép', 'sinh tố',
+            'trà', 'matcha', 'bánh ngọt', 'tráng miệng', 'ăn chơi', 'ăn uống', 'đi ăn',
+            # Korean
+            '치킨', '커피', '식당', '밥',
+        ],
         'emoji': ['🍜', '☕', '🍕', '🍔', '🍱'],
         'responses': ["Yummy! 😋", "맛있게 드세요!", "Ăn ngon nha!", "Enjoy your meal! 🍴", "Tasty! 😄"]
     },
     'Groceries': {
-        'keywords': ['grocery', 'groceries', 'market', 'supermarket', 'mart',
-                     'đi chợ', 'siêu thị', 'thực phẩm', 'coupang', '쿠팡', 'emart', 'homeplus', 
-                     'lotte mart', 'rau', 'thịt', 'trứng', 'sữa', 'gạo', 'chợ'],
+        'keywords': [
+            # English
+            'grocery', 'groceries', 'market', 'supermarket', 'mart', 'vegetables', 'fruits', 'meat',
+            'fish', 'rice', 'eggs', 'milk', 'bread', 'snacks', 'water', 'oil', 'salt', 'sugar',
+            'spices', 'frozen', 'canned', 'produce', 'dairy', 'bakery',
+            # Vietnamese
+            'đi chợ', 'siêu thị', 'thực phẩm', 'rau', 'thịt', 'trứng', 'sữa', 'gạo', 'chợ',
+            'rau củ quả', 'rau củ', 'củ quả', 'đường', 'muối', 'dầu ăn', 'nước mắm', 'gia vị',
+            'bột', 'mì gói', 'đồ khô', 'hoa quả', 'trái cây', 'cam', 'táo', 'chuối', 'nho',
+            'dưa hấu', 'xoài', 'bánh kẹo', 'đồ ăn vặt', 'nước uống', 'nước lọc', 'nước suối',
+            'mua rau', 'mua thịt', 'mua đồ', 'đồ gia dụng', 'giấy vệ sinh', 'xà phòng', 'bột giặt',
+            'nước rửa chén', 'nước rửa bát', 'khăn giấy', 'tã', 'sữa tắm', 'dầu gội',
+            # Korean stores
+            'coupang', '쿠팡', 'emart', 'homeplus', 'lotte mart', '이마트', '홈플러스', '롯데마트',
+        ],
         'emoji': ['🛒', '🥬', '🥚'],
         'responses': ["Stocking up! 🛒", "Coupang delivery? 📦", "Fresh groceries! 🥬"]
     },
     'Transport': {
-        'keywords': ['grab', 'taxi', 'bus', 'subway', 'train', 'ktx', 'parking', 'toll',
-                     'xe', '택시', 'xe buýt', 'tàu điện', '지하철', 'gửi xe', 'đỗ xe', 
-                     'phí cầu đường', 'xăng', 'đổ xăng', 'uber', 'kakao taxi', 'đi lại'],
+        'keywords': [
+            # English
+            'grab', 'taxi', 'bus', 'subway', 'train', 'ktx', 'parking', 'toll', 'ride', 'uber', 'lyft',
+            'gas', 'petrol', 'fuel', 'car wash', 'maintenance', 'repair', 'ticket', 'fare', 'transit',
+            # Vietnamese
+            'xe', 'xe buýt', 'tàu điện', 'gửi xe', 'đỗ xe', 'phí cầu đường', 'xăng', 'đổ xăng',
+            'đi lại', 'đi xe', 'tiền xe', 'vé xe', 'xe máy', 'ô tô', 'xe hơi', 'sửa xe', 'rửa xe',
+            'bảo dưỡng', 'phí giao thông', 'cầu đường', 'phà', 'tàu', 'máy bay', 'vé tàu',
+            'tiền xăng', 'tiền gửi xe', 'bãi xe', 'phí đỗ xe',
+            # Korean
+            '택시', '지하철', 'kakao taxi', '카카오택시', '버스', '주유',
+        ],
         'emoji': ['🚕', '🚇', '🚗'],
         'responses': ["Safe travels! 🚗", "Đi cẩn thận nha!", "On the move! 🚇"]
     },
     'Gift': {
-        'keywords': ['gift', 'present', 'wedding gift', 'birthday', 'baby shower',
-                     'quà', 'tặng', 'quà cưới', 'mừng cưới', 'quà sinh nhật', 'sinh nhật', 
-                     'đám cưới', '돌잔치', 'thôi nôi', 'quà tân gia', 'tặng bạn', 'mừng'],
+        'keywords': [
+            # English
+            'gift', 'present', 'wedding gift', 'birthday', 'baby shower', 'graduation', 'christmas',
+            'holiday', 'celebration', 'party', 'surprise',
+            # Vietnamese
+            'quà', 'tặng', 'quà cưới', 'mừng cưới', 'quà sinh nhật', 'sinh nhật', 'đám cưới',
+            'thôi nôi', 'quà tân gia', 'tặng bạn', 'mừng', 'quà tặng', 'tặng quà', 'mừng sinh nhật',
+            'tiệc', 'lễ', 'quà noel', 'quà tết', 'lì xì', 'tiền mừng', 'phong bì',
+            # Korean
+            '돌잔치', '선물', '축하',
+        ],
         'emoji': ['🎁', '💝', '🎀'],
         'responses': ["So thoughtful! 💕", "Người nhận sẽ vui lắm!", "Nice gift! 🎁", "Generous! 💝"]
     },
     'Family Support': {
-        'keywords': ['mom', 'dad', 'parents', 'family', 'send home',
-                     'cho mẹ', 'cho ba', 'biếu', 'hỗ trợ gia đình', 'gửi về', 'gửi tiền', 
-                     'tiền nhà', 'bố mẹ', 'gia đình', 'cho bố', 'mẹ', 'ba', 'bố'],
+        'keywords': [
+            # English
+            'mom', 'dad', 'parents', 'family', 'send home', 'remittance', 'support family',
+            # Vietnamese
+            'cho mẹ', 'cho ba', 'biếu', 'hỗ trợ gia đình', 'gửi về', 'gửi tiền', 'tiền nhà',
+            'bố mẹ', 'gia đình', 'cho bố', 'mẹ', 'ba', 'bố', 'biếu bố mẹ', 'gửi về nhà',
+            'tiền gửi về', 'chu cấp', 'nuôi gia đình', 'cho ông bà', 'ông', 'bà', 'anh chị em',
+        ],
         'emoji': ['👨‍👩‍👧', '❤️', '🏠'],
         'responses': ["Family first! ❤️", "Hiếu thảo quá! 👏", "Family love! 👨‍👩‍👧"]
     },
     'Date': {
-        'keywords': ['date', 'dating', 'couple', 'anniversary', 'romantic', 'valentine',
-                     'hẹn hò', 'kỷ niệm', 'lãng mạn', 'đi chơi hai đứa', 'tình yêu'],
+        'keywords': [
+            # English
+            'date', 'dating', 'couple', 'anniversary', 'romantic', 'valentine', 'love',
+            # Vietnamese
+            'hẹn hò', 'kỷ niệm', 'lãng mạn', 'đi chơi hai đứa', 'tình yêu', 'hai đứa',
+            'đi date', 'ngày kỷ niệm', 'valentine', 'đi chơi cùng', 'với bé', 'với anh', 'với em',
+        ],
         'emoji': ['💑', '🥰', '💕'],
         'responses': ["Enjoy your date! 💕", "Have fun you two! 🥰", "Love is in the air! 💑"]
     },
     'Entertainment': {
-        'keywords': ['movie', 'game', 'netflix', 'concert', 'karaoke', 'pc bang',
-                     'phim', 'xem phim', 'giải trí', 'game', '노래방', 'pc방', 'youtube', 'spotify'],
+        'keywords': [
+            # English
+            'movie', 'game', 'netflix', 'concert', 'karaoke', 'pc bang', 'show', 'music', 'festival',
+            'park', 'zoo', 'museum', 'arcade', 'bowling', 'billiards', 'pool', 'sports', 'gym', 'fitness',
+            'cinema', 'theater', 'play', 'ticket', 'event',
+            # Vietnamese
+            'phim', 'xem phim', 'giải trí', 'game', 'youtube', 'spotify', 'xem show', 'ca nhạc',
+            'nhạc hội', 'lễ hội', 'công viên', 'du ngoạn', 'chụp ảnh', 'studio', 'spa', 'massage',
+            'làm đẹp', 'làm nail', 'làm tóc', 'cắt tóc', 'nhuộm tóc', 'rạp phim', 'rạp chiếu phim',
+            'đi chơi', 'vui chơi', 'thư giãn', 'nghỉ ngơi',
+            # Korean
+            '노래방', 'pc방', '영화', '게임',
+        ],
         'emoji': ['🎬', '🎮', '🎤'],
         'responses': ["Have fun! 🎉", "Giải trí xíu! 🎬", "Enjoy! 🎮"]
     },
     'Shopping': {
-        'keywords': ['buy', 'purchase', 'clothes', 'shoes', 'daiso', 'olive young', 'shop',
-                     'mua', 'quần áo', 'giày dép', 'shopping', 'mỹ phẩm', 'skincare', 
-                     '다이소', '올리브영', 'mua sắm', 'đồ', 'áo', 'quần'],
+        'keywords': [
+            # English
+            'buy', 'purchase', 'clothes', 'shoes', 'daiso', 'olive young', 'shop', 'shopping',
+            'electronics', 'phone', 'laptop', 'headphones', 'accessories', 'home', 'kitchen',
+            'decor', 'furniture', 'online shopping', 'amazon', 'fashion', 'style', 'wear',
+            # Vietnamese
+            'mua', 'quần áo', 'giày dép', 'mỹ phẩm', 'skincare', 'mua sắm', 'đồ', 'áo', 'quần',
+            'đồ dùng', 'vật dụng', 'đồ gia dụng', 'điện tử', 'điện thoại', 'laptop', 'máy tính',
+            'tai nghe', 'đồ decor', 'trang trí', 'nội thất', 'đồ bếp', 'chén bát', 'xoong nồi',
+            'váy', 'đầm', 'túi xách', 'balo', 'ví', 'đồng hồ', 'trang sức', 'phụ kiện',
+            'son', 'kem dưỡng', 'serum', 'toner', 'sữa rửa mặt', 'makeup', 'trang điểm',
+            # Korean
+            '다이소', '올리브영', '쇼핑', '옷',
+        ],
         'emoji': ['🛍️', '👗', '👟'],
         'responses': ["Treat yourself! 🛍️", "Shopping therapy! 💅", "Nice buy! 👍"]
     },
     'Travel': {
-        'keywords': ['flight', 'ticket', 'hotel', 'travel', 'trip', 'airbnb', 'booking',
-                     'vé máy bay', 'vé', 'khách sạn', 'du lịch', 'về việt nam', 'về quê', 
-                     'bay', 'book', 'đặt phòng', 'resort', 'nghỉ dưỡng'],
+        'keywords': [
+            # English
+            'flight', 'ticket', 'hotel', 'travel', 'trip', 'airbnb', 'booking', 'vacation',
+            'holiday', 'tour', 'visa', 'passport', 'luggage', 'suitcase', 'airport',
+            # Vietnamese
+            'vé máy bay', 'vé', 'khách sạn', 'du lịch', 'về việt nam', 'về quê', 'bay', 'book',
+            'đặt phòng', 'resort', 'nghỉ dưỡng', 'đi chơi xa', 'nghỉ mát', 'biển', 'núi',
+            'sân bay', 'hành lý', 'vali', 'visa', 'hộ chiếu', 'tour', 'đặt tour',
+            # Korean
+            '여행', '비행기', '호텔',
+        ],
         'emoji': ['✈️', '🧳', '🏖️'],
         'responses': ["Bon voyage! ✈️", "Safe travels!", "Du lịch vui nha! 🌴", "Về quê! 🇻🇳❤️"]
     },
     'Healthcare': {
-        'keywords': ['doctor', 'hospital', 'medicine', 'pharmacy', 'clinic', 'health',
-                     'bác sĩ', 'thuốc', 'bệnh viện', '병원', '약국', 'khám bệnh', 'hiệu thuốc',
-                     'vitamin', 'sick', 'ốm', 'bệnh'],
+        'keywords': [
+            # English
+            'doctor', 'hospital', 'medicine', 'pharmacy', 'clinic', 'health', 'dental', 'eye',
+            'glasses', 'checkup', 'test', 'lab', 'insurance', 'supplements', 'treatment',
+            # Vietnamese
+            'bác sĩ', 'thuốc', 'bệnh viện', 'khám bệnh', 'hiệu thuốc', 'vitamin', 'sick', 'ốm',
+            'bệnh', 'khám', 'chữa bệnh', 'xét nghiệm', 'siêu âm', 'nha khoa', 'răng', 'mắt',
+            'kính', 'thuốc bổ', 'thực phẩm chức năng', 'bảo hiểm y tế', 'tiêm', 'vaccine',
+            'nhổ răng', 'trám răng', 'khám mắt', 'thuốc men', 'y tế', 'sức khỏe',
+            # Korean
+            '병원', '약국', '약', '의사',
+        ],
         'emoji': ['💊', '🏥', '💪'],
         'responses': ["Health is wealth! 💪", "Get well soon!", "Take care! 🏥"]
     },
     'Loan & Debt': {
-        'keywords': ['lend', 'borrow', 'debt', 'loan', 'repay', 'pay back',
-                     'cho mượn', 'mượn', 'trả nợ', 'vay', 'nợ', 'trả lại', 'cho vay',
-                     'thiếu', 'lending', 'owed', 'trả tiền'],
+        'keywords': [
+            # English
+            'lend', 'borrow', 'debt', 'loan', 'repay', 'pay back', 'lending', 'owed', 'owe',
+            # Vietnamese
+            'cho mượn', 'mượn', 'trả nợ', 'vay', 'nợ', 'trả lại', 'cho vay', 'thiếu', 'trả tiền',
+            'mượn tiền', 'cho vay tiền', 'nợ tiền', 'trả nợ tiền', 'đòi nợ', 'thu nợ',
+        ],
         'emoji': ['🤝', '💸', '📝'],
         'responses': ["Loan tracked! 🤝", "Don't forget to follow up! 📝", "Noted! 💸"]
     },
     'Business': {
-        'keywords': ['ads', 'contractor', 'client', 'marketing', 'revenue', 'business',
-                     'quảng cáo', 'cộng tác viên', 'khách hàng', 'doanh thu', 'công việc',
-                     'ad spend', 'facebook ads', 'campaign',
-                     'chị dương', 'chi duong', 'dương', 'duong',
-                     'gởi jacob', 'goi jacob', 'tiền jacob', 'tien jacob', 'jacob fee'],
+        'keywords': [
+            # English
+            'ads', 'contractor', 'client', 'marketing', 'revenue', 'business', 'ad spend',
+            'facebook ads', 'campaign', 'google ads', 'tiktok ads', 'advertising', 'promotion',
+            # Vietnamese
+            'quảng cáo', 'cộng tác viên', 'khách hàng', 'doanh thu', 'công việc', 'kinh doanh',
+            'chi phí quảng cáo', 'chạy ads', 'thuê người', 'nhân viên', 'lương nhân viên',
+            # Specific people
+            'chị dương', 'chi duong', 'dương', 'duong',
+            'gởi jacob', 'goi jacob', 'tiền jacob', 'tien jacob', 'jacob fee',
+        ],
         'emoji': ['💼', '📈', '💹'],
         'responses': ["Business expense logged! 💼", "Invest to grow! 📈", "Business moves! 💹"]
     },
     'Subscription': {
-        'keywords': ['subscription', 'monthly', 'netflix', 'spotify', 'claude', 'chatgpt',
-                     'đăng ký', 'gói tháng', 'youtube premium', 'disney', 'apple'],
+        'keywords': [
+            # English
+            'subscription', 'monthly', 'netflix', 'spotify', 'claude', 'chatgpt', 'premium',
+            'membership', 'annual', 'yearly', 'plan', 'tier',
+            # Vietnamese
+            'đăng ký', 'gói tháng', 'youtube premium', 'disney', 'apple', 'gói năm', 'thuê bao',
+            'phí hàng tháng', 'gia hạn', 'renew',
+        ],
         'emoji': ['📱', '💳', '🔄'],
         'responses': ["Subscription noted! 📱", "Monthly fee logged! 💳"]
     },
     'Housing': {
-        'keywords': ['rent', 'deposit', 'maintenance', '관리비', '월세', 'apartment',
-                     'tiền nhà', 'thuê nhà', 'đặt cọc', 'bảo trì', 'nhà', 'phòng'],
+        'keywords': [
+            # English
+            'rent', 'deposit', 'maintenance', 'apartment', 'house', 'utilities', 'electric',
+            'water bill', 'gas bill', 'internet bill', 'wifi',
+            # Vietnamese
+            'tiền nhà', 'thuê nhà', 'đặt cọc', 'bảo trì', 'nhà', 'phòng', 'tiền điện', 'tiền nước',
+            'tiền gas', 'tiền mạng', 'tiền wifi', 'phí chung cư', 'phí quản lý',
+            # Korean
+            '관리비', '월세', '전세', '집세',
+        ],
         'emoji': ['🏠', '🔑', '🏢'],
         'responses': ["Home sweet home! 🏠", "Housing cost noted! 🔑"]
     },
     'Education': {
-        'keywords': ['course', 'class', 'book', 'study', 'korean class', 'learn', 'school',
-                     'học', 'khóa học', 'lớp', 'sách', 'học tiếng hàn', '한국어', 'tiếng hàn'],
+        'keywords': [
+            # English
+            'course', 'class', 'book', 'study', 'korean class', 'learn', 'school', 'tuition',
+            'university', 'college', 'training', 'workshop', 'seminar', 'certificate',
+            # Vietnamese
+            'học', 'khóa học', 'lớp', 'sách', 'học tiếng hàn', 'tiếng hàn', 'học phí', 'trường',
+            'đại học', 'cao đẳng', 'đào tạo', 'workshop', 'hội thảo', 'chứng chỉ', 'thi', 'ôn thi',
+            # Korean
+            '한국어', '학원', '수업',
+        ],
         'emoji': ['📚', '🎓', '✏️'],
         'responses': ["Invest in yourself! 📚", "Knowledge is power! 🎓", "Keep learning! ✏️"]
     },
     'Pet': {
-        'keywords': ['pet', 'cat', 'dog', 'vet', 'mèo', 'chó', 'thú cưng', 'thú y', 'pet food'],
+        'keywords': [
+            # English
+            'pet', 'cat', 'dog', 'vet', 'pet food', 'pet supplies', 'grooming', 'puppy', 'kitten',
+            # Vietnamese
+            'mèo', 'chó', 'thú cưng', 'thú y', 'đồ cho mèo', 'đồ cho chó', 'thức ăn cho mèo',
+            'thức ăn cho chó', 'cát vệ sinh', 'lồng', 'dây xích', 'vòng cổ', 'đồ chơi cho pet',
+        ],
         'emoji': ['🐱', '🐕', '🐾'],
         'responses': ["For the fur baby! 🐾", "Pet parent life! 🐱"]
     },
     'Income': {
-        'keywords': ['salary', 'commission', 'bonus', 'income', 'revenue', 'wage', 'pay',
-                     'lương', 'hoa hồng', 'thưởng', 'thu nhập', 'tiền lương'],
+        'keywords': [
+            # English
+            'salary', 'commission', 'bonus', 'income', 'revenue', 'wage', 'pay', 'paycheck',
+            'earnings', 'profit', 'dividend', 'interest', 'refund', 'cashback',
+            # Vietnamese
+            'lương', 'hoa hồng', 'thưởng', 'thu nhập', 'tiền lương', 'tiền công', 'tiền thưởng',
+            'lãi', 'hoàn tiền', 'nhận tiền', 'được trả', 'tiền về',
+        ],
         'emoji': ['💰', '🎉', '💵'],
         'responses': ["Money in! 💰", "Cha-ching! 🎉", "Nice! Keep it coming! 💪", "Pay day! 💵"]
     },

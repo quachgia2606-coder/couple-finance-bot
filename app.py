@@ -2050,26 +2050,34 @@ def slack_events():
                 slack_client.chat_postMessage(channel=channel, text="❓ Cách dùng: `set budget dining 300K`\n\nCategories: dining, groceries, entertainment, shopping, transport, business, healthcare, gift")
                 return jsonify({'ok': True})
 
-            # Map short names to full category names
+            # Map short names to full category names (English + Vietnamese)
             category_map = {
-                'dining': 'Food & Dining',
-                'food': 'Food & Dining',
-                'groceries': 'Groceries',
-                'grocery': 'Groceries',
-                'entertainment': 'Entertainment',
-                'shopping': 'Shopping',
-                'transport': 'Transport',
-                'business': 'Business',
-                'healthcare': 'Healthcare',
-                'health': 'Healthcare',
-                'gift': 'Gift',
+                # Food & Dining
+                'dining': 'Food & Dining', 'food': 'Food & Dining', 'ăn': 'Food & Dining',
+                'ăn uống': 'Food & Dining', 'đồ ăn': 'Food & Dining', 'cơm': 'Food & Dining',
+                # Groceries
+                'groceries': 'Groceries', 'grocery': 'Groceries', 'chợ': 'Groceries',
+                'siêu thị': 'Groceries', 'rau': 'Groceries', 'thực phẩm': 'Groceries',
+                # Entertainment
+                'entertainment': 'Entertainment', 'giải trí': 'Entertainment', 'vui chơi': 'Entertainment',
+                # Shopping
+                'shopping': 'Shopping', 'mua sắm': 'Shopping', 'mua': 'Shopping',
+                # Transport
+                'transport': 'Transport', 'xe': 'Transport', 'đi lại': 'Transport', 'xăng': 'Transport',
+                # Business
+                'business': 'Business', 'kinh doanh': 'Business', 'công việc': 'Business',
+                # Healthcare
+                'healthcare': 'Healthcare', 'health': 'Healthcare', 'sức khỏe': 'Healthcare',
+                'thuốc': 'Healthcare', 'y tế': 'Healthcare',
+                # Gift
+                'gift': 'Gift', 'quà': 'Gift', 'tặng': 'Gift',
             }
 
             category_input = parts[2].lower()
             category = category_map.get(category_input)
 
             if not category:
-                slack_client.chat_postMessage(channel=channel, text=f"❓ Không tìm thấy category '{category_input}'\n\nCategories: dining, groceries, entertainment, shopping, transport, business, healthcare, gift")
+                slack_client.chat_postMessage(channel=channel, text=f"❓ Không tìm thấy category '{category_input}'\n\nCategories: dining/ăn, groceries/chợ, entertainment/giải trí, shopping/mua sắm, transport/xe, business, healthcare/sức khỏe, gift/quà")
                 return jsonify({'ok': True})
 
             amount = parse_amount(parts[3])

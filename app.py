@@ -1472,6 +1472,13 @@ def slack_events():
         text = event.get('text', '').strip()
         user_id = event.get('user')
         
+        # Ignore messages directed at other bots (like @OpenClaw)
+        # Bot mentions at start look like: "<@U01234567> message..."
+        if re.match(r'^<@U[A-Z0-9]+>', text):
+            # If message STARTS with a mention, it's directed at another bot/user
+            # Finance Bot should not respond to these
+            return jsonify({'ok': True})
+        
         user_name = detect_user_name(user_id)
         
         text_lower = text.lower()
